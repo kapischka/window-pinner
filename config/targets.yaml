@@ -1,0 +1,152 @@
+# Watch-list for the Pokémon 30th Anniversary preorder bot.
+#
+# The set releasing Sept 16, 2026 is the Pokémon TCG "30th Celebration" expansion.
+# Confirmed products in the lineup (used as match keywords below):
+#   Elite Trainer Box, Pokémon Center Elite Trainer Box, Ultra Premium Collection,
+#   Poster Collection, Tech Sticker Collection, Eevee Knock Out Collection,
+#   Eevee 2-Pack Blister, Sylveon ex box, Greninja ex box.
+#
+# Each target is one page the bot will check. Two "type" values:
+#   product_page  - a URL for one specific product; the bot reads the overall
+#                    page status (in stock / preorder / sold out).
+#   search_page    - a category/search results URL; the bot scans the page
+#                    text for the keywords below and reports status per match.
+#
+# "render: true" means the page needs a real browser (Playwright/Chromium) to
+# load its content (JS-driven storefront). "render: false" uses a plain HTTP
+# request, which is faster but will fail on JS-only sites.
+#
+# NOTE: Amazon, GameStop, Walmart, Target and Best Buy all run bot-detection
+# (Akamai/PerimeterX/Cloudflare). Even with render:true these can intermittently
+# return CAPTCHA/403 pages instead of real content. Treat their results as
+# best-effort and don't hammer them — the bot already rate-limits requests.
+
+keywords: &keywords
+  - "30th Celebration"
+  - "30th Anniversary"
+  - "30. Jubiläum"
+  - "30-jähriges Jubiläum"
+  - "Sylveon ex"
+  - "Greninja ex"
+  - "Ultra Premium Collection"
+  - "Poster Collection"
+  - "Tech Sticker Collection"
+  - "Eevee Knock Out Collection"
+  - "Eevee 2-Pack Blister"
+  - "Elite Trainer Box"
+
+available_patterns: &available_patterns
+  - "add to cart"
+  - "in den warenkorb"
+  - "pre-order"
+  - "preorder"
+  - "vorbestellen"
+  - "jetzt vorbestellen"
+  - "buy now"
+  - "in stock"
+  - "verfügbar"
+
+unavailable_patterns: &unavailable_patterns
+  - "sold out"
+  - "ausverkauft"
+  - "out of stock"
+  - "nicht verfügbar"
+  - "nicht auf lager"
+  - "coming soon"
+  - "demnächst"
+  - "notify me"
+  - "benachrichtigen"
+  - "unavailable"
+
+targets:
+  # --- Germany --------------------------------------------------------
+  - id: pokemoncenter_de_new_releases
+    name: "Pokémon Center Germany – New Releases"
+    retailer: "Pokémon Center (DE)"
+    url: "https://www.pokemoncenter.com/de-de/category/new-releases"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: amazon_de_search
+    name: "Amazon.de – Pokémon 30th Celebration search"
+    retailer: "Amazon.de"
+    url: "https://www.amazon.de/s?k=pokemon+30th+celebration"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: mediamarkt_de_search
+    name: "MediaMarkt.de – Pokémon 30th Celebration search"
+    retailer: "MediaMarkt (DE)"
+    url: "https://www.mediamarkt.de/de/search.html?query=pokemon+30th+celebration"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: otto_de_search
+    name: "Otto.de – Pokémon 30th Celebration search"
+    retailer: "Otto (DE)"
+    url: "https://www.otto.de/suche/pokemon%2030th%20celebration/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  # --- English / International ----------------------------------------
+  - id: pokemoncenter_us_new_releases
+    name: "Pokémon Center (US/Intl) – New Releases"
+    retailer: "Pokémon Center (US)"
+    url: "https://www.pokemoncenter.com/en-us/category/new-releases"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: gamestop_ultra_premium_collection
+    name: "GameStop – 30th Celebration Ultra Premium Collection"
+    retailer: "GameStop (US)"
+    url: "https://www.gamestop.com/toys-games/trading-cards/products/pokemon-trading-card-game-30th-celebration-ultra-premium-collection-styles-may-vary/20036364.html"
+    type: product_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: amazon_com_search
+    name: "Amazon.com – Pokémon 30th Celebration search"
+    retailer: "Amazon.com"
+    url: "https://www.amazon.com/s?k=pokemon+30th+celebration"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: target_search
+    name: "Target.com – Pokémon 30th Celebration search"
+    retailer: "Target"
+    url: "https://www.target.com/s?searchTerm=pokemon+30th+celebration"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: bestbuy_search
+    name: "Best Buy – Pokémon 30th Celebration search"
+    retailer: "Best Buy"
+    url: "https://www.bestbuy.com/site/searchpage.jsp?st=pokemon+30th+celebration"
+    type: search_page
+    render: true
+    keywords: *keywords
+    available_patterns: *available_patterns
+    unavailable_patterns: *unavailable_patterns
