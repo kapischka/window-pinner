@@ -37,18 +37,30 @@ _SCHEMA_AVAILABILITY_MAP = {
     "invalid": "unavailable",
 }
 
-# Conservative phrases that indicate a bot-detection/CAPTCHA page rather than
+# Phrases that indicate a bot-detection/CAPTCHA interstitial rather than
 # real content, so that gets reported distinctly from a genuine "no product
-# found yet".
+# found yet". Kept deliberately specific and multi-word (real interstitial
+# copy, not just "captcha" or "access denied" alone) - short generic phrases
+# turned out to false-positive constantly: a bare "captcha" substring check
+# also matched "reCAPTCHA", which shows up in the routine legal-disclosure
+# footer text ("This site is protected by reCAPTCHA...") that nearly every
+# ordinary shop embeds for its contact/newsletter forms, and generic phrases
+# like "access denied" or "request blocked" turn out to appear in all sorts
+# of unrelated login/permission text.
 _BLOCKED_PHRASES = (
-    "captcha",
+    "complete the captcha",
+    "solve the captcha",
+    "verify the captcha",
     "are you a human",
-    "access denied",
-    "unusual traffic from your computer",
     "verify you are a human",
+    "verifying you are human",
+    "checking your browser",
+    "unusual traffic from your computer",
     "pardon our interruption",
-    "request blocked",
     "robot check",
+    "attention required! | cloudflare",
+    "enable javascript and cookies to continue",
+    "ddos protection by cloudflare",
 )
 
 
@@ -59,18 +71,29 @@ class MatchResult:
     snippet: str
 
 
-def looks_blocked(html: str) -> bool:
-    """Best-effort check for a bot-detection/CAPTCHA page, so that shows up
-    distinctly from a legitimate 'no matching product yet' result.
-
-    Uses word-boundary matching rather than plain substring checks - a bare
-    "captcha" substring check would also match "reCAPTCHA", which shows up
-    in the completely unrelated legal-disclosure footer text ("This site is
-    protected by reCAPTCHA...") that countless ordinary, non-blocked pages
-    embed for their contact/newsletter forms.
+def find_blocked_phrase(html: str) -> tuple[str, str] | None:
+    """Returns (matched_phrase, surrounding_snippet) if the page looks like a
+    bot-detection/CAPTCHA interstitial, else None. Surfacing the actual match
+    (not just a yes/no) is what let the "captcha"/"recaptcha" false positive
+    get diagnosed and fixed - any future false positive should be just as
+    visible in the dashboard's detail text instead of a guessing game.
     """
-    text_lower = _page_text(html).lower()
-    return any(re.search(r"\b" + re.escape(phrase) + r"\b", text_lower) for phrase in _BLOCKED_PHRASES)
+    text = _page_text(html)
+    text_lower = text.lower()
+    for phrase in _BLOCKED_PHRASES:
+        match = re.search(r"\b" + re.escape(phrase) + r"\b", text_lower)
+        if match:
+            start = max(0, match.start() - 80)
+            end = min(len(text), match.end() + 80)
+            snippet = re.sub(r"\s+", " ", text[start:end]).strip()
+            return phrase, snippet
+    return None
+
+
+def looks_blocked(html: str) -> bool:
+    """Best-effort check for a bot-detection/CAPTCHA page - see
+    `find_blocked_phrase` for the phrase actually matched."""
+    return find_blocked_phrase(html) is not None
 
 
 def _page_text(html: str) -> str:

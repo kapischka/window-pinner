@@ -238,11 +238,23 @@ for every hit so you can sanity check a result yourself before acting on it.
 
 A separate `blocked` status means the page looked like a bot-detection/
 CAPTCHA challenge rather than real content - worth knowing about since it's
-different from a legitimate "nothing listed yet" (`no_match`). A
-`product_page` target (a single specific product URL, once real ones exist
-for this release) also gets flagged `no_match` if its keywords no longer
-appear on the page at all, since that usually means the URL went stale
-(delisted, redirected) rather than that the product is simply unavailable.
+different from a legitimate "nothing listed yet" (`no_match`). Its detail
+text always shows exactly which phrase matched and the surrounding snippet
+(e.g. `matched "checking your browser": …Checking your browser before
+accessing…`) rather than a generic "you got blocked" message - this is
+deliberate: an earlier version's check for bare `"captcha"` also matched
+`"reCAPTCHA"`, which shows up in the routine legal-disclosure footer text
+nearly every ordinary shop embeds for its contact form, so *every* target
+came back `blocked` regardless of whether it actually was. Surfacing the
+matched text is what made that diagnosable in the first place - if `blocked`
+ever looks wrong again, the detail line says why; the phrase list in
+`matcher.py`'s `_BLOCKED_PHRASES` can be trimmed or extended from there.
+
+A `product_page` target (a single specific product URL, once real ones
+exist for this release) also gets flagged `no_match` if its keywords no
+longer appear on the page at all, since that usually means the URL went
+stale (delisted, redirected) rather than that the product is simply
+unavailable.
 
 **Fetching reliability notes:**
 - One Chromium instance is now shared across all JS-rendered targets in a

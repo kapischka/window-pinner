@@ -1,4 +1,4 @@
-from pokemon_preorder_bot.matcher import looks_blocked, match_product_page, match_search_page
+from pokemon_preorder_bot.matcher import find_blocked_phrase, looks_blocked, match_product_page, match_search_page
 
 PREORDER = ["pre-order", "vorbestellen", "予約する"]
 IN_STOCK = ["add to cart", "in den warenkorb", "カートに入れる"]
@@ -107,6 +107,11 @@ def test_looks_blocked_detects_captcha_page():
     assert not looks_blocked("<html><body>30th Celebration Elite Trainer Box - Add to Cart</body></html>")
 
 
+def test_looks_blocked_detects_cloudflare_style_interstitial():
+    html = "<html><body>Checking your browser before accessing the website. This may take a few seconds.</body></html>"
+    assert looks_blocked(html)
+
+
 def test_looks_blocked_does_not_false_positive_on_recaptcha_footer():
     """Regression test: a bare 'captcha' substring check also matches
     'reCAPTCHA', which shows up in the routine legal-disclosure footer text
@@ -120,3 +125,21 @@ def test_looks_blocked_does_not_false_positive_on_recaptcha_footer():
     </body></html>
     """
     assert not looks_blocked(html)
+
+
+def test_looks_blocked_does_not_false_positive_on_generic_access_denied():
+    """Regression test: bare short phrases like 'access denied' or 'request
+    blocked' turned out to appear in all sorts of unrelated login/permission
+    text on ordinary pages, causing every target to be misreported as
+    bot-blocked - only specific, real interstitial copy should count."""
+    html = "<html><body>Access denied: please log in to view your account orders.</body></html>"
+    assert not looks_blocked(html)
+
+
+def test_find_blocked_phrase_returns_matched_text_for_diagnosis():
+    html = "<html><body>Please verify you are a human before continuing.</body></html>"
+    result = find_blocked_phrase(html)
+    assert result is not None
+    phrase, snippet = result
+    assert phrase == "verify you are a human"
+    assert "verify you are a human" in snippet.lower()

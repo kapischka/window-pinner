@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import load_targets
 from .fetcher import FetchError, fetch, playwright_browser
-from .matcher import STATUSES_ACTIONABLE, looks_blocked, match_product_page, match_search_page
+from .matcher import STATUSES_ACTIONABLE, find_blocked_phrase, match_product_page, match_search_page
 from .notifier import notify, setup_logging
 from .state import StateStore
 
@@ -77,10 +77,18 @@ def run(args: argparse.Namespace) -> None:
                 time.sleep(args.delay + random.uniform(0, args.delay))
                 continue
 
-            if looks_blocked(html):
-                logger.warning("%s looks like a bot-detection/CAPTCHA page, skipping", target.name)
+            blocked = find_blocked_phrase(html)
+            if blocked:
+                phrase, snippet = blocked
+                logger.warning("%s looks like a bot-detection/CAPTCHA page (matched %r): %s", target.name, phrase, snippet)
                 summary.append(
-                    {"target": target.name, "retailer": target.retailer, "url": target.url, "status": "blocked", "detail": "page looks like a bot-detection/CAPTCHA challenge, not real content"}
+                    {
+                        "target": target.name,
+                        "retailer": target.retailer,
+                        "url": target.url,
+                        "status": "blocked",
+                        "detail": f'matched "{phrase}": …{snippet}…',
+                    }
                 )
                 time.sleep(args.delay + random.uniform(0, args.delay))
                 continue
