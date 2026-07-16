@@ -61,9 +61,16 @@ class MatchResult:
 
 def looks_blocked(html: str) -> bool:
     """Best-effort check for a bot-detection/CAPTCHA page, so that shows up
-    distinctly from a legitimate 'no matching product yet' result."""
+    distinctly from a legitimate 'no matching product yet' result.
+
+    Uses word-boundary matching rather than plain substring checks - a bare
+    "captcha" substring check would also match "reCAPTCHA", which shows up
+    in the completely unrelated legal-disclosure footer text ("This site is
+    protected by reCAPTCHA...") that countless ordinary, non-blocked pages
+    embed for their contact/newsletter forms.
+    """
     text_lower = _page_text(html).lower()
-    return any(phrase in text_lower for phrase in _BLOCKED_PHRASES)
+    return any(re.search(r"\b" + re.escape(phrase) + r"\b", text_lower) for phrase in _BLOCKED_PHRASES)
 
 
 def _page_text(html: str) -> str:

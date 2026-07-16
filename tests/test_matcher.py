@@ -105,3 +105,18 @@ def test_product_page_flags_stale_url_when_keyword_missing():
 def test_looks_blocked_detects_captcha_page():
     assert looks_blocked("<html><body>Please complete the CAPTCHA to continue</body></html>")
     assert not looks_blocked("<html><body>30th Celebration Elite Trainer Box - Add to Cart</body></html>")
+
+
+def test_looks_blocked_does_not_false_positive_on_recaptcha_footer():
+    """Regression test: a bare 'captcha' substring check also matches
+    'reCAPTCHA', which shows up in the routine legal-disclosure footer text
+    countless ordinary (non-blocked) shop pages embed for their contact or
+    newsletter forms - this must not be flagged as a bot-detection page."""
+    html = """
+    <html><body>
+    <div class="product-card">30th Celebration Elite Trainer Box - Add to Cart</div>
+    <footer>This site is protected by reCAPTCHA and the Google Privacy Policy
+    and Terms of Service apply.</footer>
+    </body></html>
+    """
+    assert not looks_blocked(html)
