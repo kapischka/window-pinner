@@ -7,7 +7,8 @@
   --accent: #2563eb;
   --accent-text: #ffffff;
   --danger: #dc2626;
-  --available: #16a34a;
+  --preorder: #2563eb;
+  --in-stock: #16a34a;
   --unavailable: #dc2626;
   --unknown: #9ca3af;
   --error: #d97706;
@@ -23,7 +24,8 @@
     --accent: #3b82f6;
     --accent-text: #ffffff;
     --danger: #f87171;
-    --available: #34d399;
+    --preorder: #3b82f6;
+    --in-stock: #34d399;
     --unavailable: #f87171;
     --unknown: #9ca3af;
     --error: #fbbf24;
@@ -114,7 +116,7 @@ h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
   font-size: 0.9rem;
   border: 1px solid var(--border);
 }
-.flash-success { border-color: var(--available); }
+.flash-success { border-color: var(--in-stock); }
 .flash-error { border-color: var(--danger); }
 
 .grid {
@@ -171,7 +173,8 @@ h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
   letter-spacing: 0.02em;
 }
 
-.badge-available { background: var(--available); }
+.badge-preorder { background: var(--preorder); }
+.badge-in_stock { background: var(--in-stock); }
 .badge-unavailable { background: var(--unavailable); }
 .badge-unknown, .badge-no_match { background: var(--unknown); }
 .badge-error { background: var(--error); }

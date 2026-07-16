@@ -1,10 +1,24 @@
 # Watch-list for the Pokémon 30th Anniversary preorder bot.
 #
-# The set releasing Sept 16, 2026 is the Pokémon TCG "30th Celebration" expansion.
-# Confirmed products in the lineup (used as match keywords below):
-#   Elite Trainer Box, Pokémon Center Elite Trainer Box, Ultra Premium Collection,
-#   Poster Collection, Tech Sticker Collection, Eevee Knock Out Collection,
-#   Eevee 2-Pack Blister, Sylveon ex box, Greninja ex box.
+# The set releasing Sept 16, 2026 is the Pokémon TCG "30th Celebration"
+# expansion - branded "30th CELEBRATION" worldwide, including on the Japanese
+# storefronts, so the same set-keyword works across regions. Confirmed
+# products: Elite Trainer Box, Pokémon Center Elite Trainer Box, Ultra
+# Premium Collection, Poster Collection, Tech Sticker Collection, Eevee Knock
+# Out Collection, Eevee 2-Pack Blister, Double Deck Box, Sylveon ex box,
+# Greninja ex box (English/German lineup); Japan's lineup differs (MEGA
+# Expansion Pack Box, Premium Deck Sets, etc, partly lottery/invitation-based
+# via Amazon.co.jp rather than a plain preorder).
+#
+# IMPORTANT - two-tier keyword matching:
+#   `keywords`         - identifies the set itself (e.g. "30th Celebration").
+#   `product_keywords` - if non-empty, a matched card must ALSO contain one
+#                         of these to count as a real hit.
+# This second tier exists because a bare "30th anniversary" style search
+# picks up a lot of unrelated same-era merch - the separate "Pokémon Day 2026
+# Collection" (a Feb 2026 promo, different product), 30th-anniversary plush,
+# apparel, LEGO sets, etc. Requiring a product-type word alongside the set
+# name filters that noise out.
 #
 # Each target is one page the bot will check. Two "type" values:
 #   product_page  - a URL for one specific product; the bot reads the overall
@@ -16,35 +30,67 @@
 # load its content (JS-driven storefront). "render: false" uses a plain HTTP
 # request, which is faster but will fail on JS-only sites.
 #
-# NOTE: Amazon, GameStop, Walmart, Target and Best Buy all run bot-detection
-# (Akamai/PerimeterX/Cloudflare). Even with render:true these can intermittently
-# return CAPTCHA/403 pages instead of real content. Treat their results as
-# best-effort and don't hammer them — the bot already rate-limits requests.
+# Status values the bot reports: "preorder" (explicit preorder/reservation/
+# lottery-entry wording found - the main thing you're waiting for),
+# "in_stock" (a regular buy-now signal, no preorder wording - notable in case
+# a seller lists it as already released), "unavailable" (sold out / not yet
+# listed / notify-me), "unknown" (product mentioned, no recognizable status
+# text nearby).
+#
+# NOTE: Amazon and other large storefronts run bot-detection
+# (Akamai/PerimeterX/Cloudflare). Even with render:true these can
+# intermittently return CAPTCHA/blocked pages instead of real content. Treat
+# their results as best-effort and don't hammer them - the bot already
+# rate-limits requests.
 
 keywords: &keywords
   - "30th Celebration"
-  - "30th Anniversary"
-  - "30. Jubiläum"
-  - "30-jähriges Jubiläum"
-  - "Sylveon ex"
-  - "Greninja ex"
+
+product_keywords_intl: &product_keywords_intl
+  - "Elite Trainer Box"
   - "Ultra Premium Collection"
   - "Poster Collection"
   - "Tech Sticker Collection"
   - "Eevee Knock Out Collection"
   - "Eevee 2-Pack Blister"
-  - "Elite Trainer Box"
+  - "Double Deck Box"
+  - "Sylveon ex"
+  - "Greninja ex"
 
-available_patterns: &available_patterns
-  - "add to cart"
-  - "in den warenkorb"
+product_keywords_jp: &product_keywords_jp
+  - "拡張パック"
+  - "デッキ"
+  - "BOX"
+  - "セット"
+  - "カードゲーム"
+  - "プレミアム"
+
+preorder_patterns: &preorder_patterns
   - "pre-order"
   - "preorder"
   - "vorbestellen"
   - "jetzt vorbestellen"
+  - "vorbestellbar"
+  - "reserve now"
+  - "予約する"
+  - "予約受付中"
+  - "予約開始"
+  - "抽選予約"
+  - "抽選受付"
+  - "招待リクエスト"
+  - "応募する"
+  - "先行予約"
+
+in_stock_patterns: &in_stock_patterns
+  - "add to cart"
+  - "in den warenkorb"
+  - "jetzt kaufen"
   - "buy now"
   - "in stock"
   - "verfügbar"
+  - "カートに入れる"
+  - "購入する"
+  - "在庫あり"
 
 unavailable_patterns: &unavailable_patterns
   - "sold out"
@@ -57,6 +103,11 @@ unavailable_patterns: &unavailable_patterns
   - "notify me"
   - "benachrichtigen"
   - "unavailable"
+  - "売り切れ"
+  - "在庫なし"
+  - "受付終了"
+  - "抽選終了"
+  - "販売終了"
 
 targets:
   # --- Germany --------------------------------------------------------
@@ -67,7 +118,9 @@ targets:
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
   - id: amazon_de_search
@@ -77,7 +130,9 @@ targets:
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
   - id: mediamarkt_de_search
@@ -87,7 +142,9 @@ targets:
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
   - id: otto_de_search
@@ -97,56 +154,57 @@ targets:
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
-  # --- English / International ----------------------------------------
-  - id: pokemoncenter_us_new_releases
-    name: "Pokémon Center (US/Intl) – New Releases"
-    retailer: "Pokémon Center (US)"
+  # --- International ----------------------------------------------------
+  - id: pokemoncenter_intl_new_releases
+    name: "Pokémon Center (International) – New Releases"
+    retailer: "Pokémon Center (International)"
     url: "https://www.pokemoncenter.com/en-us/category/new-releases"
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
-    unavailable_patterns: *unavailable_patterns
-
-  - id: gamestop_ultra_premium_collection
-    name: "GameStop – 30th Celebration Ultra Premium Collection"
-    retailer: "GameStop (US)"
-    url: "https://www.gamestop.com/toys-games/trading-cards/products/pokemon-trading-card-game-30th-celebration-ultra-premium-collection-styles-may-vary/20036364.html"
-    type: product_page
-    render: true
-    keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
   - id: amazon_com_search
     name: "Amazon.com – Pokémon 30th Celebration search"
-    retailer: "Amazon.com"
+    retailer: "Amazon.com (International)"
     url: "https://www.amazon.com/s?k=pokemon+30th+celebration"
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
-  - id: target_search
-    name: "Target.com – Pokémon 30th Celebration search"
-    retailer: "Target"
-    url: "https://www.target.com/s?searchTerm=pokemon+30th+celebration"
+  # --- Japan --------------------------------------------------------------
+  - id: pokemoncenter_jp_30th_feature
+    name: "Pokémon Center Japan – 30th Anniversary feature page"
+    retailer: "Pokémon Center (Japan)"
+    url: "https://www.pokemoncenter-online.com/feature/30th.html"
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_jp
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns
 
-  - id: bestbuy_search
-    name: "Best Buy – Pokémon 30th Celebration search"
-    retailer: "Best Buy"
-    url: "https://www.bestbuy.com/site/searchpage.jsp?st=pokemon+30th+celebration"
+  - id: amazon_jp_search
+    name: "Amazon.co.jp – 30th Celebration search"
+    retailer: "Amazon.co.jp"
+    url: "https://www.amazon.co.jp/s?k=%E3%83%9D%E3%82%B1%E3%83%A2%E3%83%B3%E3%82%AB%E3%83%BC%E3%83%89+30th+celebration"
     type: search_page
     render: true
     keywords: *keywords
-    available_patterns: *available_patterns
+    product_keywords: *product_keywords_jp
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
     unavailable_patterns: *unavailable_patterns

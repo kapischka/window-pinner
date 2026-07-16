@@ -106,7 +106,9 @@ def targets_page():
         "targets.html",
         targets=targets,
         default_keywords="\n".join(defaults["keywords"]),
-        default_available="\n".join(defaults["available_patterns"]),
+        default_product_keywords="\n".join(defaults["product_keywords"]),
+        default_preorder="\n".join(defaults["preorder_patterns"]),
+        default_in_stock="\n".join(defaults["in_stock_patterns"]),
         default_unavailable="\n".join(defaults["unavailable_patterns"]),
     )
 
@@ -132,7 +134,9 @@ def add_target():
             render="render" in request.form,
             enabled=True,
             keywords=_lines_from_textarea(request.form.get("keywords", "")),
-            available_patterns=_lines_from_textarea(request.form.get("available_patterns", "")),
+            product_keywords=_lines_from_textarea(request.form.get("product_keywords", "")),
+            preorder_patterns=_lines_from_textarea(request.form.get("preorder_patterns", "")),
+            in_stock_patterns=_lines_from_textarea(request.form.get("in_stock_patterns", "")),
             unavailable_patterns=_lines_from_textarea(request.form.get("unavailable_patterns", "")),
         )
     )
@@ -152,7 +156,9 @@ def update_target(target_id: str):
             t.type = request.form["type"]
             t.render = "render" in request.form
             t.keywords = _lines_from_textarea(request.form.get("keywords", ""))
-            t.available_patterns = _lines_from_textarea(request.form.get("available_patterns", ""))
+            t.product_keywords = _lines_from_textarea(request.form.get("product_keywords", ""))
+            t.preorder_patterns = _lines_from_textarea(request.form.get("preorder_patterns", ""))
+            t.in_stock_patterns = _lines_from_textarea(request.form.get("in_stock_patterns", ""))
             t.unavailable_patterns = _lines_from_textarea(request.form.get("unavailable_patterns", ""))
             break
     else:

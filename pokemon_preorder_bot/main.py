@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import load_targets
 from .fetcher import FetchError, fetch
-from .matcher import match_product_page, match_search_page
+from .matcher import STATUSES_ACTIONABLE, match_product_page, match_search_page
 from .notifier import notify, setup_logging
 from .state import StateStore
 
@@ -67,29 +67,36 @@ def run(args: argparse.Namespace) -> None:
             continue
 
         if target.type == "search_page":
-            matches = match_search_page(html, target.keywords, target.available_patterns, target.unavailable_patterns)
+            matches = match_search_page(
+                html,
+                target.keywords,
+                target.product_keywords,
+                target.preorder_patterns,
+                target.in_stock_patterns,
+                target.unavailable_patterns,
+            )
             if not matches:
                 summary.append(
                     {"target": target.name, "retailer": target.retailer, "url": target.url, "status": "no_match", "detail": "no matching product keywords found on page"}
                 )
             for m in matches:
                 prev = state.last_status(target.id, m.keyword)
-                if m.status == "available" and prev != "available":
+                if m.status in STATUSES_ACTIONABLE and prev not in STATUSES_ACTIONABLE:
                     notify(
-                        f"Preorder available: {target.retailer}",
-                        f"{m.keyword} looks available on {target.retailer}\n{target.url}",
+                        f"{m.status.replace('_', ' ').title()}: {target.retailer}",
+                        f"{m.keyword} looks like a {m.status.replace('_', ' ')} on {target.retailer}\n{target.url}",
                     )
                 state.set_status(target.id, m.keyword, m.status)
                 summary.append(
                     {"target": target.name, "retailer": target.retailer, "url": target.url, "keyword": m.keyword, "status": m.status, "detail": m.snippet}
                 )
         else:  # product_page
-            m = match_product_page(html, target.name, target.available_patterns, target.unavailable_patterns)
+            m = match_product_page(html, target.name, target.preorder_patterns, target.in_stock_patterns, target.unavailable_patterns)
             prev = state.last_status(target.id, m.keyword)
-            if m.status == "available" and prev != "available":
+            if m.status in STATUSES_ACTIONABLE and prev not in STATUSES_ACTIONABLE:
                 notify(
-                    f"Preorder available: {target.retailer}",
-                    f"{target.name} looks available on {target.retailer}\n{target.url}",
+                    f"{m.status.replace('_', ' ').title()}: {target.retailer}",
+                    f"{target.name} looks like a {m.status.replace('_', ' ')} on {target.retailer}\n{target.url}",
                 )
             state.set_status(target.id, m.keyword, m.status)
             summary.append(

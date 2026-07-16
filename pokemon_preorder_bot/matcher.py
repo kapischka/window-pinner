@@ -10,11 +10,18 @@ CARD_HINTS = ("product", "card", "tile", "item", "result", "listing", "sku")
 FALLBACK_HOPS = 3  # levels to climb when no card-like ancestor class is found
 MAX_ANCESTOR_HOPS = 8
 
+# Status values, most to least actionable:
+#   "preorder"    - explicit preorder/reservation/lottery-entry language found
+#   "in_stock"    - a regular buy-now/add-to-cart signal found (no preorder wording)
+#   "unavailable" - sold out / not yet listed / notify-me language found
+#   "unknown"     - product mentioned but no recognizable status language nearby
+STATUSES_ACTIONABLE = ("preorder", "in_stock")
+
 
 @dataclass
 class MatchResult:
     keyword: str
-    status: str  # "available" | "unavailable" | "unknown"
+    status: str
     snippet: str
 
 
@@ -62,27 +69,53 @@ def _find_card_container(text_node) -> "BeautifulSoup":
     return ancestors[min(FALLBACK_HOPS, len(ancestors) - 1)]
 
 
-def _status_in_window(window: str, available_patterns: list[str], unavailable_patterns: list[str]) -> str:
+def _classify_status(
+    window: str,
+    preorder_patterns: list[str],
+    in_stock_patterns: list[str],
+    unavailable_patterns: list[str],
+) -> str:
     window_lower = window.lower()
     has_unavailable = any(p.lower() in window_lower for p in unavailable_patterns)
-    has_available = any(p.lower() in window_lower for p in available_patterns)
-    if has_unavailable and not has_available:
+    has_preorder = any(p.lower() in window_lower for p in preorder_patterns)
+    has_in_stock = any(p.lower() in window_lower for p in in_stock_patterns)
+
+    # Explicit preorder/reservation/lottery wording is the strongest, most
+    # specific signal - trust it even if a generic "sold out" phrase also
+    # appears elsewhere in a noisy card (e.g. a *different* size/variant).
+    if has_preorder:
+        return "preorder"
+    if has_unavailable and not has_in_stock:
         return "unavailable"
-    if has_available and not has_unavailable:
-        return "available"
-    if has_available and has_unavailable:
-        # Ambiguous page (e.g. listing with mixed stock) - prefer the more
-        # actionable signal since a false "available" just costs one extra look.
-        return "available"
+    if has_in_stock and not has_unavailable:
+        return "in_stock"
+    if has_in_stock and has_unavailable:
+        # Ambiguous (e.g. a disabled "Add to Cart" button next to "Out of
+        # Stock" text) - don't guess either way.
+        return "unknown"
     return "unknown"
+
+
+def _has_any(text_lower: str, terms: list[str]) -> bool:
+    return any(t.lower() in text_lower for t in terms)
 
 
 def match_search_page(
     html: str,
     keywords: list[str],
-    available_patterns: list[str],
+    product_keywords: list[str],
+    preorder_patterns: list[str],
+    in_stock_patterns: list[str],
     unavailable_patterns: list[str],
 ) -> list[MatchResult]:
+    """Scan a listing/search page for product cards matching `keywords`.
+
+    If `product_keywords` is non-empty, a card must ALSO contain one of those
+    terms to count - this is what keeps a generic search for "30th
+    Celebration" from also flagging unrelated same-era merch (e.g. the
+    separate "Pokémon Day 2026 Collection" or plush/apparel lines) that
+    happens to share the word "30th" but isn't actually this TCG release.
+    """
     soup = _clean_soup(html)
     results: list[MatchResult] = []
     for keyword in keywords:
@@ -96,7 +129,12 @@ def match_search_page(
                 continue
             seen_containers.add(id(container))
             window = container.get_text(" ", strip=True)
-            status = _status_in_window(window, available_patterns, unavailable_patterns)
+            window_lower = window.lower()
+
+            if product_keywords and not _has_any(window_lower, product_keywords):
+                continue
+
+            status = _classify_status(window, preorder_patterns, in_stock_patterns, unavailable_patterns)
             snippet = re.sub(r"\s+", " ", window)[: CONTEXT_WINDOW * 2].strip()
             results.append(MatchResult(keyword=keyword, status=status, snippet=snippet))
     return results
@@ -105,10 +143,11 @@ def match_search_page(
 def match_product_page(
     html: str,
     target_name: str,
-    available_patterns: list[str],
+    preorder_patterns: list[str],
+    in_stock_patterns: list[str],
     unavailable_patterns: list[str],
 ) -> MatchResult:
     text = _page_text(html)
-    status = _status_in_window(text, available_patterns, unavailable_patterns)
+    status = _classify_status(text, preorder_patterns, in_stock_patterns, unavailable_patterns)
     snippet = re.sub(r"\s+", " ", text)[:CONTEXT_WINDOW].strip()
     return MatchResult(keyword=target_name, status=status, snippet=snippet)

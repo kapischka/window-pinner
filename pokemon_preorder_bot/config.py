@@ -16,7 +16,9 @@ class Target:
     render: bool
     enabled: bool = True
     keywords: list[str] = field(default_factory=list)
-    available_patterns: list[str] = field(default_factory=list)
+    product_keywords: list[str] = field(default_factory=list)
+    preorder_patterns: list[str] = field(default_factory=list)
+    in_stock_patterns: list[str] = field(default_factory=list)
     unavailable_patterns: list[str] = field(default_factory=list)
 
 
@@ -39,7 +41,9 @@ def load_targets(config_path: str | Path) -> list[Target]:
                 render=bool(raw.get("render", False)),
                 enabled=bool(raw.get("enabled", True)),
                 keywords=raw.get("keywords", []),
-                available_patterns=raw.get("available_patterns", []),
+                product_keywords=raw.get("product_keywords", []),
+                preorder_patterns=raw.get("preorder_patterns", []),
+                in_stock_patterns=raw.get("in_stock_patterns", []),
                 unavailable_patterns=raw.get("unavailable_patterns", []),
             )
         )
@@ -52,7 +56,9 @@ def load_defaults(config_path: str | Path) -> dict:
     data = _load_raw(config_path)
     return {
         "keywords": data.get("keywords", []),
-        "available_patterns": data.get("available_patterns", []),
+        "product_keywords": data.get("product_keywords", []),
+        "preorder_patterns": data.get("preorder_patterns", []),
+        "in_stock_patterns": data.get("in_stock_patterns", []),
         "unavailable_patterns": data.get("unavailable_patterns", []),
     }
 
@@ -67,7 +73,9 @@ def target_to_dict(t: Target) -> dict:
         "render": t.render,
         "enabled": t.enabled,
         "keywords": t.keywords,
-        "available_patterns": t.available_patterns,
+        "product_keywords": t.product_keywords,
+        "preorder_patterns": t.preorder_patterns,
+        "in_stock_patterns": t.in_stock_patterns,
         "unavailable_patterns": t.unavailable_patterns,
     }
 

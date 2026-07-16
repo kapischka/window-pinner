@@ -13,7 +13,7 @@
   {% for t in targets %}
   <details class="target-item {{ 'disabled' if not t.enabled }}">
     <summary>
-      <span class="badge {{ 'badge-available' if t.enabled else 'badge-disabled' }}">{{ 'enabled' if t.enabled else 'disabled' }}</span>
+      <span class="badge {{ 'badge-in_stock' if t.enabled else 'badge-disabled' }}">{{ 'enabled' if t.enabled else 'disabled' }}</span>
       <strong>{{ t.retailer }}</strong> — {{ t.name }}
       <span class="muted small">({{ t.id }})</span>
     </summary>
@@ -38,11 +38,17 @@
         <input type="checkbox" name="render" {{ "checked" if t.render }}>
         Needs a real browser to render (JavaScript storefront)
       </label>
-      <label>Keywords (one per line)
-        <textarea name="keywords" rows="6">{{ t.keywords | join("\n") }}</textarea>
+      <label>Set keywords (one per line) - identifies this release
+        <textarea name="keywords" rows="3">{{ t.keywords | join("\n") }}</textarea>
       </label>
-      <label>Available-status phrases (one per line)
-        <textarea name="available_patterns" rows="4">{{ t.available_patterns | join("\n") }}</textarea>
+      <label>Product keywords (one per line) - a card must ALSO contain one of these to count; leave empty to skip this check
+        <textarea name="product_keywords" rows="6">{{ t.product_keywords | join("\n") }}</textarea>
+      </label>
+      <label>Preorder-status phrases (one per line)
+        <textarea name="preorder_patterns" rows="4">{{ t.preorder_patterns | join("\n") }}</textarea>
+      </label>
+      <label>In-stock/buy-now phrases (one per line)
+        <textarea name="in_stock_patterns" rows="4">{{ t.in_stock_patterns | join("\n") }}</textarea>
       </label>
       <label>Unavailable-status phrases (one per line)
         <textarea name="unavailable_patterns" rows="4">{{ t.unavailable_patterns | join("\n") }}</textarea>
@@ -90,11 +96,17 @@
       <input type="checkbox" name="render" checked>
       Needs a real browser to render (JavaScript storefront)
     </label>
-    <label>Keywords (one per line)
-      <textarea name="keywords" rows="6">{{ default_keywords }}</textarea>
+    <label>Set keywords (one per line) - identifies this release
+      <textarea name="keywords" rows="3">{{ default_keywords }}</textarea>
     </label>
-    <label>Available-status phrases (one per line)
-      <textarea name="available_patterns" rows="4">{{ default_available }}</textarea>
+    <label>Product keywords (one per line) - a card must ALSO contain one of these to count; leave empty to skip this check
+      <textarea name="product_keywords" rows="6">{{ default_product_keywords }}</textarea>
+    </label>
+    <label>Preorder-status phrases (one per line)
+      <textarea name="preorder_patterns" rows="4">{{ default_preorder }}</textarea>
+    </label>
+    <label>In-stock/buy-now phrases (one per line)
+      <textarea name="in_stock_patterns" rows="4">{{ default_in_stock }}</textarea>
     </label>
     <label>Unavailable-status phrases (one per line)
       <textarea name="unavailable_patterns" rows="4">{{ default_unavailable }}</textarea>
