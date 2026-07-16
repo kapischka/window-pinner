@@ -7,9 +7,15 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 
 CONTEXT_WINDOW = 300  # characters of surrounding text checked for status keywords (product_page fallback)
-CARD_HINTS = ("product", "card", "tile", "item", "result", "listing", "sku")
-FALLBACK_HOPS = 3  # levels to climb when no card-like ancestor class is found
+# Deliberately NOT "item", "result", "listing" - those are just as likely to
+# name the *wrapper around the whole results grid* (e.g. class="search-results"
+# or "product-listing") as a single card, which was silently merging one
+# product's set-keyword mention with a completely unrelated product's
+# product-keyword elsewhere on the same page into one false "match".
+CARD_HINTS = ("product", "card", "tile", "sku")
 MAX_ANCESTOR_HOPS = 8
+MIN_CARD_TEXT_LEN = 10  # below this, the container is probably just the bare title with no price/button
+MAX_CARD_TEXT_LEN = 600  # above this, it's probably a multi-product wrapper, not a single card
 LABEL_SNIPPET_LEN = 40  # chars used to disambiguate cards that matched no product keyword
 
 # Status values, most to least actionable:
@@ -170,16 +176,23 @@ def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
     return products
 
 
-def _find_card_container(text_node) -> "BeautifulSoup":
+def _find_card_container(text_node):
     """Walk up from a matched text node to the element that best represents
-    its enclosing product card, so status keywords from a neighbouring card
-    on the same listing page don't bleed into this one.
+    its enclosing product card, so status/product-keyword text from a
+    neighbouring - or completely unrelated - product on the same listing
+    page doesn't bleed into this one.
 
     Prefers the nearest ancestor whose class name looks like a product card
     (handles siblings like price/button that live outside the matched title
-    tag). Falls back to a fixed number of hops when no such ancestor exists,
-    since stopping at the first small tag (e.g. an <h3> title) would miss
-    those sibling elements entirely.
+    tag), but only if that container's total text is a plausible size for a
+    single card. If none qualifies, falls back to the nearest ancestor of a
+    plausible size at all - never a blind fixed number of hops, since on
+    pages with no distinguishing per-card classes that risks climbing all
+    the way to a wrapper around the *entire results grid*, at which point
+    virtually any product-keyword anywhere on the page would incorrectly
+    satisfy the match. Returns None when nothing trustworthy is found -
+    better to miss a hit than to report a false one made of two unrelated
+    products' text stitched together.
     """
     ancestors = []
     node = text_node.parent
@@ -195,9 +208,19 @@ def _find_card_container(text_node) -> "BeautifulSoup":
     for ancestor in ancestors:
         classes = " ".join(ancestor.get("class", [])).lower() if hasattr(ancestor, "get") else ""
         if any(hint in classes for hint in CARD_HINTS):
+            if len(ancestor.get_text(" ", strip=True)) <= MAX_CARD_TEXT_LEN:
+                return ancestor
+            # This and every further ancestor can only be bigger - a
+            # card-like class this large is itself the results-grid wrapper,
+            # not a single card. Stop looking on the class-hint path.
+            break
+
+    for ancestor in ancestors:
+        text_len = len(ancestor.get_text(" ", strip=True))
+        if MIN_CARD_TEXT_LEN <= text_len <= MAX_CARD_TEXT_LEN:
             return ancestor
 
-    return ancestors[min(FALLBACK_HOPS, len(ancestors) - 1)]
+    return None
 
 
 def _classify_status(

@@ -38,6 +38,24 @@ def test_search_page_gives_distinct_state_keys_for_different_products():
     assert len(labels) == len(set(labels)), f"labels are not unique: {labels}"
 
 
+def test_search_page_does_not_bleed_into_unrelated_product_via_wrapper_class():
+    """Regression test: on a page with no distinguishing per-card classes,
+    climbing up from a "search results for: 30th Celebration" banner must
+    not reach all the way up to the results-grid wrapper (here deliberately
+    named "search-results", which used to match the old, too-generic
+    CARD_HINTS entry "result") and combine it with a totally unrelated
+    product's text elsewhere on that same page."""
+    html = """
+    <div class="search-results">
+      <h1>Suchergebnisse für: 30th Celebration</h1>
+      <div><span>Charizard Deck Box</span><span>Add to Cart</span></div>
+      <div><span>Some Unrelated Elite Trainer Box (different set)</span><span>Sold Out</span></div>
+    </div>
+    """
+    results = match_search_page(html, ["30th Celebration"], PRODUCT_KEYWORDS, PREORDER, IN_STOCK, UNAVAILABLE)
+    assert results == [], f"expected no trustworthy match, got: {results}"
+
+
 def test_search_page_filters_out_unrelated_product_with_same_set_keyword():
     """A page mentioning '30th Celebration'-adjacent but non-TCG merch (e.g.
     the separate Pokémon Day collection or plush) shouldn't count as a hit

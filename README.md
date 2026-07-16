@@ -208,13 +208,25 @@ the word "30th" but aren't this TCG release:
 
 For search/listing pages, the bot parses the DOM and, for each keyword hit,
 climbs to the enclosing element that looks like a product card (by class
-name, e.g. `product`, `card`, `tile`) so that status text from a *different*
-product on the same page doesn't get attributed to your match. Each distinct
-product gets its own tracked identity (set keyword + the specific product
-term that matched, e.g. `"30th Celebration — Elite Trainer Box"`) so that two
-different products found on the same search page are remembered separately
-instead of overwriting each other's status between runs. It then classifies
-each card's text into one of four statuses, in order of precedence:
+name, e.g. `product`, `card`, `tile`, `sku`) so that status text from a
+*different* product on the same page doesn't get attributed to your match.
+That climb deliberately stops - and the match is dropped entirely rather
+than trusted - if the resulting container's text is too large to plausibly
+be a single product card (over ~600 characters): on pages with no
+distinguishing per-item classes, climbing without that cap could reach all
+the way up to the wrapper around the *entire results grid*, at which point
+any product-keyword found anywhere else on the page (a totally unrelated
+listing) would incorrectly count as confirming the match. Better to miss an
+occasional real hit on an unusually-marked-up page than to report one
+stitched together from two unrelated products - if that happens on a
+specific site, it'll show up as `no_match` instead of a wrong `preorder`.
+
+Each distinct product gets its own tracked identity (set keyword + the
+specific product term that matched, e.g.
+`"30th Celebration — Elite Trainer Box"`) so that two different products
+found on the same search page are remembered separately instead of
+overwriting each other's status between runs. It then classifies each
+card's text into one of four statuses, in order of precedence:
 
 - **`preorder`** — explicit preorder/reservation/lottery-entry wording found
   (English/German/Japanese, including Japan's 抽選予約 / 招待リクエスト
