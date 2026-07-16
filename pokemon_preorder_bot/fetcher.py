@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import contextmanager
+from urllib.parse import urlparse
 
 import requests
 
@@ -12,6 +14,36 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
+# Common cookie-consent/region-interstitial buttons that would otherwise sit
+# on top of the real content on a first visit (no cookies carried between
+# runs). Best-effort: clicked if found within a couple seconds, ignored
+# otherwise - a missed banner just means the existing text heuristics have to
+# work around it, same as before this existed.
+_CONSENT_BUTTON_TEXTS = [
+    "Accept All", "Accept all", "Accept", "I Agree", "Agree",
+    "Alle akzeptieren", "Akzeptieren", "Ich stimme zu", "Zustimmen",
+    "すべて同意する", "同意する",
+]
+
+# schema.org JSON-LD availability aside, locale mainly affects which
+# language/currency a storefront renders in for anonymous sessions - matters
+# for the DE/JP targets specifically, since a hardcoded en-US locale could
+# make a German or Japanese site render US pricing/availability instead of
+# the region actually being watched.
+_LOCALE_HINTS = [
+    (("pokemoncenter-online.com", ".co.jp", ".jp/"), ("ja-JP", "ja-JP,ja;q=0.9,en;q=0.5")),
+    ((".de/", ".de?", "/de-de/", "/de/"), ("de-DE", "de-DE,de;q=0.9,en;q=0.5")),
+]
+_DEFAULT_LOCALE = ("en-US", "en-US,en;q=0.9,de;q=0.8")
+
+
+def _locale_for_url(url: str) -> tuple[str, str]:
+    host_and_path = urlparse(url).netloc + urlparse(url).path
+    for needles, locale in _LOCALE_HINTS:
+        if any(n in host_and_path or n in url for n in needles):
+            return locale
+    return _DEFAULT_LOCALE
+
 
 class FetchError(Exception):
     pass
@@ -19,10 +51,8 @@ class FetchError(Exception):
 
 def fetch_static(url: str, timeout: int = 20, retries: int = 2) -> str:
     """Plain HTTP GET for server-rendered pages."""
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
-    }
+    _, accept_language = _locale_for_url(url)
+    headers = {"User-Agent": USER_AGENT, "Accept-Language": accept_language}
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -36,33 +66,82 @@ def fetch_static(url: str, timeout: int = 20, retries: int = 2) -> str:
     raise FetchError(f"static fetch failed for {url}: {last_error}")
 
 
-def fetch_rendered(url: str, wait_ms: int = 4000, timeout_ms: int = 30000) -> str:
-    """Load a page in headless Chromium for JS-driven storefronts."""
+@contextmanager
+def playwright_browser():
+    """One Chromium instance shared across every rendered fetch in a run,
+    instead of launching a fresh browser per target - launching is by far
+    the slowest part of a rendered fetch, and with an always-on auto-check
+    loop that cost is paid repeatedly rather than once."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise FetchError(
-            "playwright is not installed; run `pip install playwright && "
-            "playwright install chromium`"
+            "playwright is not installed; run `pip install playwright && playwright install chromium`"
         ) from exc
 
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            yield browser
+        finally:
+            browser.close()
+
+
+def _dismiss_consent_banner(page) -> None:
+    for text in _CONSENT_BUTTON_TEXTS:
+        try:
+            button = page.get_by_text(text, exact=False).first
+            if button.is_visible(timeout=500):
+                button.click(timeout=1000)
+                page.wait_for_timeout(300)
+                return
+        except Exception:  # noqa: BLE001 - purely best-effort, never fatal
+            continue
+
+
+def _fetch_rendered_once(browser, url: str, wait_ms: int, timeout_ms: int) -> str:
+    locale, accept_language = _locale_for_url(url)
+    page = browser.new_page(
+        user_agent=USER_AGENT,
+        viewport={"width": 1366, "height": 900},
+        locale=locale,
+        extra_http_headers={"Accept-Language": accept_language},
+    )
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+        page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+        _dismiss_consent_banner(page)
+        page.wait_for_timeout(wait_ms)
+        # Nudge lazy-loaded product grids into loading before we read the DOM.
+        try:
+            page.mouse.wheel(0, 2000)
+            page.wait_for_timeout(1000)
+        except Exception:  # noqa: BLE001 - best-effort only
+            pass
+        return page.content()
+    finally:
+        page.close()
+
+
+def fetch_rendered(url: str, browser=None, wait_ms: int = 4000, timeout_ms: int = 30000, retries: int = 1) -> str:
+    """Load a page in headless Chromium for JS-driven storefronts.
+
+    Pass an already-open `browser` (from `playwright_browser()`) to reuse it
+    across multiple calls; omit it to launch a one-off browser for this call
+    only (used by direct/manual calls and tests).
+    """
+    if browser is not None:
+        last_error: Exception | None = None
+        for attempt in range(retries + 1):
             try:
-                page = browser.new_page(
-                    user_agent=USER_AGENT,
-                    viewport={"width": 1366, "height": 900},
-                    locale="en-US",
-                )
-                page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
-                page.wait_for_timeout(wait_ms)
-                return page.content()
-            finally:
-                browser.close()
-    except Exception as exc:  # noqa: BLE001 - surface any playwright error uniformly
-        raise FetchError(f"rendered fetch failed for {url}: {exc}") from exc
+                return _fetch_rendered_once(browser, url, wait_ms, timeout_ms)
+            except Exception as exc:  # noqa: BLE001 - surface any playwright error uniformly
+                last_error = exc
+                logger.warning("rendered fetch failed (attempt %d) for %s: %s", attempt + 1, url, exc)
+        raise FetchError(f"rendered fetch failed for {url}: {last_error}")
+
+    with playwright_browser() as owned_browser:
+        return fetch_rendered(url, browser=owned_browser, wait_ms=wait_ms, timeout_ms=timeout_ms, retries=retries)
 
 
-def fetch(url: str, render: bool) -> str:
-    return fetch_rendered(url) if render else fetch_static(url)
+def fetch(url: str, render: bool, browser=None) -> str:
+    return fetch_rendered(url, browser=browser) if render else fetch_static(url)

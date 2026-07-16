@@ -11,7 +11,7 @@
 
 <section class="panel">
   {% for t in targets %}
-  <details class="target-item {{ 'disabled' if not t.enabled }}">
+  <details class="target-item {{ 'disabled' if not t.enabled }}" {{ "open" if t.id == open_id }}>
     <summary>
       <span class="badge {{ 'badge-in_stock' if t.enabled else 'badge-disabled' }}">{{ 'enabled' if t.enabled else 'disabled' }}</span>
       <strong>{{ t.retailer }}</strong> — {{ t.name }}

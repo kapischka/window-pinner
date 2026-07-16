@@ -177,8 +177,19 @@ h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
 .badge-in_stock { background: var(--in-stock); }
 .badge-unavailable { background: var(--unavailable); }
 .badge-unknown, .badge-no_match { background: var(--unknown); }
-.badge-error { background: var(--error); }
+.badge-error, .badge-blocked { background: var(--error); }
 .badge-disabled { background: var(--muted); }
+
+.inline-form { display: flex; gap: 0.4rem; align-items: center; }
+.inline-form input[type="number"] {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
 
 .target-item {
   border: 1px solid var(--border);

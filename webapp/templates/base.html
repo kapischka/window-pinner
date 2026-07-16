@@ -25,5 +25,19 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+<script>
+  // Slow actions (a check can take 1-2 min) get disabled on submit so a
+  // double-click can't fire two overlapping requests - fast CRUD forms
+  // elsewhere are left alone since they resolve almost instantly.
+  document.querySelectorAll("form.slow-action").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var btn = form.querySelector("button");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Working…";
+      }
+    });
+  });
+</script>
 </body>
 </html>

@@ -13,16 +13,44 @@
       {% endif %}
     </div>
     <div class="actions">
-      <form method="post" action="{{ url_for('trigger_run') }}">
+      <form method="post" action="{{ url_for('trigger_run') }}" class="slow-action">
         <button type="submit" class="btn btn-primary">Run check now</button>
       </form>
-      <form method="post" action="{{ url_for('test_notify') }}">
+      <form method="post" action="{{ url_for('test_notify') }}" class="slow-action">
         <button type="submit" class="btn">Send test notification</button>
       </form>
     </div>
   </div>
   <p class="muted small">A check fetches every enabled target and can take a minute or two, especially for
-    JavaScript-rendered sites - the page will just look like it's loading until it's done.</p>
+    JavaScript-rendered sites - the page will just look like it's loading until it's done.
+    {% if discord_configured %}Notifications also go to your configured Discord webhook.{% endif %}</p>
+</section>
+
+<section class="panel">
+  <div class="panel-row">
+    <div>
+      <h2>Auto-check</h2>
+      {% if auto.enabled %}
+        <p class="muted">Running automatically every {{ auto.interval_seconds // 60 }} min
+          {% if auto.next_run_at %}- next check ~{{ auto.next_run_at.strftime("%H:%M:%S") }}{% endif %}.
+          Stays on for as long as this dashboard process keeps running.</p>
+      {% else %}
+        <p class="muted">Paused - only checks when you click "Run check now".</p>
+      {% endif %}
+      {% if auto.last_run_error %}
+        <p class="muted small">Last automatic run hit an error: {{ auto.last_run_error }}</p>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <form method="post" action="{{ url_for('toggle_auto') }}">
+        <button type="submit" class="btn">{{ "Pause auto-check" if auto.enabled else "Start auto-check" }}</button>
+      </form>
+      <form method="post" action="{{ url_for('set_auto_interval') }}" class="inline-form">
+        <input type="number" name="minutes" min="5" step="1" value="{{ auto.interval_seconds // 60 }}" style="width: 4.5em;">
+        <button type="submit" class="btn">Set interval (min)</button>
+      </form>
+    </div>
+  </div>
 </section>
 
 {% if not groups %}
@@ -49,5 +77,18 @@
     </div>
   {% endfor %}
 </section>
+
+<script>
+  // Reflect background auto-check progress without a manual reload - but
+  // never while the tab is hidden, and never while the minutes field has
+  // focus (so it doesn't wipe out an interval you're in the middle of typing).
+  setInterval(function () {
+    var active = document.activeElement;
+    var isEditingInput = active && active.tagName === "INPUT";
+    if (document.visibilityState === "visible" && !isEditingInput) {
+      window.location.reload();
+    }
+  }, 60000);
+</script>
 
 {% endblock %}

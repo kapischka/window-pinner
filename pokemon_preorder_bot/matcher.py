@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -9,6 +10,7 @@ CONTEXT_WINDOW = 300  # characters of surrounding text checked for status keywor
 CARD_HINTS = ("product", "card", "tile", "item", "result", "listing", "sku")
 FALLBACK_HOPS = 3  # levels to climb when no card-like ancestor class is found
 MAX_ANCESTOR_HOPS = 8
+LABEL_SNIPPET_LEN = 40  # chars used to disambiguate cards that matched no product keyword
 
 # Status values, most to least actionable:
 #   "preorder"    - explicit preorder/reservation/lottery-entry language found
@@ -17,12 +19,51 @@ MAX_ANCESTOR_HOPS = 8
 #   "unknown"     - product mentioned but no recognizable status language nearby
 STATUSES_ACTIONABLE = ("preorder", "in_stock")
 
+# schema.org Offer.availability values (the last URL path segment, lowercased)
+# mapped to our status vocabulary. Many storefronts embed this in JSON-LD for
+# search engines - when present it's a more reliable signal than guessing
+# from visible button text, so it's tried first.
+_SCHEMA_AVAILABILITY_MAP = {
+    "instock": "in_stock",
+    "limitedavailability": "in_stock",
+    "onlineonly": "in_stock",
+    "instorenow": "in_stock",
+    "preorder": "preorder",
+    "presale": "preorder",
+    "backorder": "preorder",
+    "outofstock": "unavailable",
+    "soldout": "unavailable",
+    "discontinued": "unavailable",
+    "invalid": "unavailable",
+}
+
+# Conservative phrases that indicate a bot-detection/CAPTCHA page rather than
+# real content, so that gets reported distinctly from a genuine "no product
+# found yet".
+_BLOCKED_PHRASES = (
+    "captcha",
+    "are you a human",
+    "access denied",
+    "unusual traffic from your computer",
+    "verify you are a human",
+    "pardon our interruption",
+    "request blocked",
+    "robot check",
+)
+
 
 @dataclass
 class MatchResult:
     keyword: str
     status: str
     snippet: str
+
+
+def looks_blocked(html: str) -> bool:
+    """Best-effort check for a bot-detection/CAPTCHA page, so that shows up
+    distinctly from a legitimate 'no matching product yet' result."""
+    text_lower = _page_text(html).lower()
+    return any(phrase in text_lower for phrase in _BLOCKED_PHRASES)
 
 
 def _page_text(html: str) -> str:
@@ -37,6 +78,66 @@ def _clean_soup(html: str) -> BeautifulSoup:
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     return soup
+
+
+def _status_from_availability(value) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    token = value.rstrip("/").rsplit("/", 1)[-1].strip().lower()
+    return _SCHEMA_AVAILABILITY_MAP.get(token)
+
+
+def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
+    """Pull (name, availability) pairs out of any schema.org Product/Offer
+    JSON-LD on the page. Most modern storefronts embed this for search
+    engines regardless of what JS framework renders the visible page, so
+    it's often available even when scraping a heavily client-rendered site.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    stack: list = []
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = tag.string or tag.get_text()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        stack.extend(data if isinstance(data, list) else [data])
+
+    products: list[tuple[str, str | None]] = []
+    seen_ids = set()
+    while stack:
+        block = stack.pop()
+        if not isinstance(block, dict) or id(block) in seen_ids:
+            continue
+        seen_ids.add(id(block))
+
+        if isinstance(block.get("@graph"), list):
+            stack.extend(block["@graph"])
+        if isinstance(block.get("itemListElement"), list):
+            for el in block["itemListElement"]:
+                if isinstance(el, dict):
+                    stack.append(el.get("item", el))
+
+        type_ = block.get("@type")
+        types_lower = {str(t).lower() for t in (type_ if isinstance(type_, list) else [type_]) if t}
+        if "product" not in types_lower:
+            continue
+
+        name = block.get("name") or ""
+        offers = block.get("offers")
+        availability = None
+        if isinstance(offers, dict):
+            availability = offers.get("availability")
+        elif isinstance(offers, list):
+            for offer in offers:
+                if isinstance(offer, dict) and offer.get("availability"):
+                    availability = offer["availability"]
+                    break
+        if name:
+            products.append((name, availability))
+    return products
 
 
 def _find_card_container(text_node) -> "BeautifulSoup":
@@ -115,7 +216,26 @@ def match_search_page(
     Celebration" from also flagging unrelated same-era merch (e.g. the
     separate "Pokémon Day 2026 Collection" or plush/apparel lines) that
     happens to share the word "30th" but isn't actually this TCG release.
+
+    Tries schema.org JSON-LD product data first (see `_extract_jsonld_products`)
+    since it's a more reliable signal than guessing from visible text; falls
+    back to a DOM-based heuristic when no matching structured data is found.
     """
+    jsonld_results: list[MatchResult] = []
+    for name, availability in _extract_jsonld_products(html):
+        name_lower = name.lower()
+        matched_keyword = next((k for k in keywords if k.lower() in name_lower), None)
+        if not matched_keyword:
+            continue
+        if product_keywords and not _has_any(name_lower, product_keywords):
+            continue
+        status = _status_from_availability(availability) or "unknown"
+        jsonld_results.append(
+            MatchResult(keyword=f"{matched_keyword} — {name}", status=status, snippet=f"[structured data] {name} (availability: {availability})")
+        )
+    if jsonld_results:
+        return jsonld_results
+
     soup = _clean_soup(html)
     results: list[MatchResult] = []
     for keyword in keywords:
@@ -131,23 +251,53 @@ def match_search_page(
             window = container.get_text(" ", strip=True)
             window_lower = window.lower()
 
-            if product_keywords and not _has_any(window_lower, product_keywords):
+            matched_products = [p for p in product_keywords if p.lower() in window_lower]
+            if product_keywords and not matched_products:
                 continue
 
             status = _classify_status(window, preorder_patterns, in_stock_patterns, unavailable_patterns)
             snippet = re.sub(r"\s+", " ", window)[: CONTEXT_WINDOW * 2].strip()
-            results.append(MatchResult(keyword=keyword, status=status, snippet=snippet))
+
+            # The label must uniquely identify *this card*, not just the set
+            # keyword - otherwise two different products matched on the same
+            # page (e.g. an Elite Trainer Box and a Sylveon ex box) collapse
+            # onto the same state-tracking key and silently overwrite each
+            # other's remembered status between runs.
+            if matched_products:
+                label = f"{keyword} — {matched_products[0]}"
+            else:
+                label = f"{keyword} — {snippet[:LABEL_SNIPPET_LEN]}"
+
+            results.append(MatchResult(keyword=label, status=status, snippet=snippet))
     return results
 
 
 def match_product_page(
     html: str,
     target_name: str,
+    keywords: list[str],
     preorder_patterns: list[str],
     in_stock_patterns: list[str],
     unavailable_patterns: list[str],
 ) -> MatchResult:
+    for name, availability in _extract_jsonld_products(html):
+        name_lower = name.lower()
+        if keywords and not _has_any(name_lower, keywords):
+            continue
+        status = _status_from_availability(availability)
+        if status:
+            return MatchResult(keyword=target_name, status=status, snippet=f"[structured data] {name} (availability: {availability})")
+
     text = _page_text(html)
+    text_lower = text.lower()
+    if keywords and not _has_any(text_lower, keywords):
+        snippet = re.sub(r"\s+", " ", text)[:CONTEXT_WINDOW].strip()
+        return MatchResult(
+            keyword=target_name,
+            status="no_match",
+            snippet=f"none of the expected keywords were found on this page - it may have moved. {snippet}",
+        )
+
     status = _classify_status(text, preorder_patterns, in_stock_patterns, unavailable_patterns)
     snippet = re.sub(r"\s+", " ", text)[:CONTEXT_WINDOW].strip()
     return MatchResult(keyword=target_name, status=status, snippet=snippet)
