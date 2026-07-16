@@ -1,4 +1,10 @@
-from pokemon_preorder_bot.matcher import find_blocked_phrase, looks_blocked, match_product_page, match_search_page
+from pokemon_preorder_bot.matcher import (
+    find_blocked_phrase,
+    has_next_page,
+    looks_blocked,
+    match_product_page,
+    match_search_page,
+)
 
 PREORDER = ["pre-order", "vorbestellen", "予約する"]
 IN_STOCK = ["add to cart", "in den warenkorb", "カートに入れる"]
@@ -120,9 +126,14 @@ def test_product_page_flags_stale_url_when_keyword_missing():
     assert result.status == "no_match"
 
 
+_REALISTIC_PAGE_PADDING = " ".join(["Free shipping on orders over 50 EUR. Secure payment. Customer service."] * 3)
+
+
 def test_looks_blocked_detects_captcha_page():
     assert looks_blocked("<html><body>Please complete the CAPTCHA to continue</body></html>")
-    assert not looks_blocked("<html><body>30th Celebration Elite Trainer Box - Add to Cart</body></html>")
+    assert not looks_blocked(
+        f"<html><body>30th Celebration Elite Trainer Box - Add to Cart {_REALISTIC_PAGE_PADDING}</body></html>"
+    )
 
 
 def test_looks_blocked_detects_cloudflare_style_interstitial():
@@ -150,7 +161,7 @@ def test_looks_blocked_does_not_false_positive_on_generic_access_denied():
     blocked' turned out to appear in all sorts of unrelated login/permission
     text on ordinary pages, causing every target to be misreported as
     bot-blocked - only specific, real interstitial copy should count."""
-    html = "<html><body>Access denied: please log in to view your account orders.</body></html>"
+    html = f"<html><body>Access denied: please log in to view your account orders. {_REALISTIC_PAGE_PADDING}</body></html>"
     assert not looks_blocked(html)
 
 
@@ -161,3 +172,31 @@ def test_find_blocked_phrase_returns_matched_text_for_diagnosis():
     phrase, snippet = result
     assert phrase == "verify you are a human"
     assert "verify you are a human" in snippet.lower()
+
+
+def test_find_blocked_phrase_flags_suspiciously_empty_page():
+    """A blank SPA shell that never hydrated, or a minimal error page,
+    shouldn't look identical to a legitimate 'nothing listed yet'."""
+    result = find_blocked_phrase("<html><body><div id='app'></div></body></html>")
+    assert result is not None
+    phrase, _ = result
+    assert phrase == "page has almost no text content"
+
+
+def test_find_blocked_phrase_accepts_normal_length_page():
+    html = "<html><body>" + ("30th Celebration Elite Trainer Box - Add to Cart. " * 5) + "</body></html>"
+    assert find_blocked_phrase(html) is None
+
+
+def test_find_blocked_phrase_does_not_flag_legitimate_no_results_message():
+    """Regression test: a real 'no results' search page is itself short -
+    that's a legitimate no_match, not a reason to call it 'blocked'."""
+    html = '<html><body><p>No results for your search.</p><link rel="next" href="?page=2"></body></html>'
+    assert find_blocked_phrase(html) is None
+
+
+def test_has_next_page_detects_rel_next_link():
+    assert has_next_page('<link rel="next" href="/search?page=2">')
+    assert has_next_page("<a>Next Page</a>")
+    assert has_next_page("<a>Nächste Seite</a>")
+    assert not has_next_page("<div>30th Celebration Elite Trainer Box - Add to Cart</div>")

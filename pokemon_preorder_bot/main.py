@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import load_targets
 from .fetcher import FetchError, fetch, playwright_browser
-from .matcher import STATUSES_ACTIONABLE, find_blocked_phrase, match_product_page, match_search_page
+from .matcher import STATUSES_ACTIONABLE, find_blocked_phrase, has_next_page, match_product_page, match_search_page
 from .notifier import notify, setup_logging
 from .state import StateStore
 
@@ -103,8 +103,11 @@ def run(args: argparse.Namespace) -> None:
                     target.unavailable_patterns,
                 )
                 if not matches:
+                    detail = "no matching product keywords found on page"
+                    if has_next_page(html):
+                        detail += " (this page appears to have more results beyond page 1, which weren't checked)"
                     summary.append(
-                        {"target": target.name, "retailer": target.retailer, "url": target.url, "status": "no_match", "detail": "no matching product keywords found on page"}
+                        {"target": target.name, "retailer": target.retailer, "url": target.url, "status": "no_match", "detail": detail}
                     )
                 for m in matches:
                     prev = state.last_status(target.id, m.keyword)

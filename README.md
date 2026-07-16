@@ -1,10 +1,16 @@
-# Pokémon 30th Anniversary Preorder Bot
+# Pokémon TCG Preorder Bot
 
-A local script that checks a configurable list of retailer pages for the
-Pokémon TCG **30th Celebration** products (releasing worldwide on
-**September 16, 2026**, branded "30th CELEBRATION" in every region including
-Japan), and fires a desktop notification the moment one looks orderable. Two
-ways to keep it running: a one-shot CLI you schedule with cron/Task
+A local script that checks a configurable list of retailer pages for two
+Pokémon TCG releases in parallel, and fires a desktop notification the
+moment one looks orderable:
+
+- **30th Celebration** (worldwide anniversary set, September 16, 2026)
+- **Dunkelnacht** / English "Mega Evolution—Pitch Black" / Japanese
+  アビスアイ "Abyss Eye" (a regular quarterly expansion, unrelated to the
+  anniversary - July 17, 2026 internationally/Germany, already released in
+  Japan)
+
+Two ways to keep it running: a one-shot CLI you schedule with cron/Task
 Scheduler, or the web dashboard's built-in auto-check, which keeps checking
 on a timer for as long as you leave that dashboard process running. Either
 way, it only detects and alerts — it never places an order for you.
@@ -27,6 +33,12 @@ Germany, international, and Japan (no US local-store chains):
   (`pokemoncenter-online.com`), Amazon.co.jp. Japan's release is partly
   lottery/invitation-based (抽選 / 招待リクエスト) rather than a plain
   preorder button — the bot recognizes that wording too.
+
+All 17 targets watch for both releases at once (the shared `keywords` list
+in `config/targets.yaml` has `"30th Celebration"`, `"Dunkelnacht"`,
+`"Pitch Black"`, and `"アビスアイ"` side by side) - a card only needs to
+match *one* of them plus a product-type term, so there's no need to
+duplicate every target per release.
 
 Add more sites any time by appending an entry to `config/targets.yaml` — no
 code changes needed (see comments in that file), or use the web dashboard's
@@ -268,18 +280,67 @@ longer appear on the page at all, since that usually means the URL went
 stale (delisted, redirected) rather than that the product is simply
 unavailable.
 
-**Fetching reliability notes:**
-- One Chromium instance is now shared across all JS-rendered targets in a
-  single run instead of launching a fresh browser per site - faster, and
-  matters more now that a run can happen automatically every few minutes.
+### Fetching reliability notes - what's handled automatically
+
+- One Chromium instance is shared across all JS-rendered targets in a single
+  run instead of launching a fresh browser per site - faster, and matters
+  more now that a run can happen automatically every few minutes.
 - The browser's locale/language header is picked based on the target's
   domain (`.de`/`de-de` → German, `.co.jp`/`pokemoncenter-online.com` →
   Japanese, else English), so a German or Japanese storefront isn't
   accidentally rendered in English/USD.
 - A best-effort attempt is made to click through common cookie-consent
-  banners (English/German/Japanese button text) before reading the page,
-  since a banner sitting on top of the product grid would otherwise hide
-  the real content from the text heuristic.
+  banners *and* region/locale splash screens (Pokémon Center shows a
+  "Choose Your Region" interstitial on a first visit) before reading the
+  page, since either would otherwise hide the real content from the text
+  heuristic. The consent-specific button text (`Accept All`, `Ich stimme
+  zu`, …) is clicked anywhere on the page; more generic wording (`Continue`,
+  `Weiter`) is only clicked *inside* something that looks like a cookie/
+  region overlay container, never page-wide - a bare "Continue" search
+  everywhere risks hitting an unrelated button (e.g. "Continue shopping")
+  and navigating off the page entirely.
+- `navigator.webdriver` (the standard tell that a browser is automated) is
+  hidden before every page load - some bot-detection challenges specifically
+  probe for it and serve a permanent block to any session that fails.
+- The page's HTTP response status is checked - a hard 4xx/5xx (real server-
+  level block or error, as opposed to a 200 OK page with JS-challenge
+  content) is reported as a clear `error` with the exact status code,
+  instead of silently being parsed as if it were normal content.
+- Lazy-loaded/infinite-scroll product grids get two scroll-and-wait passes
+  before the page is read, since a single scroll often only triggers the
+  *next* batch's loading spinner rather than its content.
+- A page with almost no text content at all (a blank single-page-app shell
+  that never finished hydrating, or a minimal error page) is flagged
+  `blocked` rather than silently read as "no product found" - see
+  `MIN_PAGE_TEXT_LEN` in `matcher.py`.
+- If a search-results page shows pagination (a `rel="next"` link, or
+  "next page"/"nächste Seite" text) and nothing matched, the `no_match`
+  detail says so explicitly - the product could be listed on page 2+
+  rather than genuinely absent from the site. The bot only ever checks
+  page 1 of a search; it doesn't paginate automatically.
+
+### What can still prevent correct detection - not automatable from here
+
+- **Filtered-out sold-out items.** Some shops default their search/category
+  view to hide out-of-stock products entirely, meaning a page can look like
+  `no_match` when the product is actually listed but just filtered out of
+  view. If you know a shop does this, check whether its URL supports an
+  "include out of stock" query parameter and add it to that target's URL.
+- **Real, unsolvable CAPTCHAs.** If a site serves an actual interactive
+  CAPTCHA (not just a JS timing challenge), no amount of browser automation
+  gets past it without a human or a paid CAPTCHA-solving service - this bot
+  intentionally does neither. It'll keep showing up as `blocked`.
+- **IP reputation / geo-blocking.** Running this from a datacenter/VPN IP
+  (rather than a normal home connection) makes bot-detection systems more
+  likely to challenge or block every request, regardless of anything else.
+- **Login-gated or member-only early access.** A few sites open preorders
+  first to logged-in loyalty members - this bot only reads public,
+  unauthenticated pages, so a members-only preorder window wouldn't be
+  visible until it opens to everyone.
+- **Rate limiting from checking too often.** Already mitigated by the
+  built-in delay/jitter and the 5-minute auto-check floor, but an
+  aggressively low interval can still eventually get an IP temporarily
+  rate-limited by a given site.
 
 ## Project layout
 

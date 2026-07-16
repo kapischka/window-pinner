@@ -1,14 +1,22 @@
-# Watch-list for the Pokémon 30th Anniversary preorder bot.
+# Watch-list for Pokémon TCG preorders/availability, tracking two releases
+# in parallel through the same set of targets:
 #
-# The set releasing Sept 16, 2026 is the Pokémon TCG "30th Celebration"
-# expansion - branded "30th CELEBRATION" worldwide, including on the Japanese
-# storefronts, so the same set-keyword works across regions. Confirmed
-# products: Elite Trainer Box, Pokémon Center Elite Trainer Box, Ultra
-# Premium Collection, Poster Collection, Tech Sticker Collection, Eevee Knock
-# Out Collection, Eevee 2-Pack Blister, Double Deck Box, Sylveon ex box,
-# Greninja ex box (English/German lineup); Japan's lineup differs (MEGA
-# Expansion Pack Box, Premium Deck Sets, etc, partly lottery/invitation-based
-# via Amazon.co.jp rather than a plain preorder).
+# 1. "30th Celebration" (Sept 16, 2026) - the 30th-anniversary expansion,
+#    branded "30th CELEBRATION" worldwide including Japan. Confirmed
+#    products: Elite Trainer Box, Pokémon Center Elite Trainer Box, Ultra
+#    Premium Collection, Poster Collection, Tech Sticker Collection, Eevee
+#    Knock Out Collection, Eevee 2-Pack Blister, Double Deck Box, Sylveon ex
+#    box, Greninja ex box (English/German lineup); Japan's lineup differs
+#    (MEGA Expansion Pack Box, Premium Deck Sets, etc, partly
+#    lottery/invitation-based via Amazon.co.jp rather than a plain preorder).
+#
+# 2. "Dunkelnacht" / English "Mega Evolution—Pitch Black" / Japanese
+#    "アビスアイ" (Abyss Eye) - an unrelated, regular quarterly TCG expansion
+#    (Mega Evolution series, headlined by Mega Darkrai ex), releasing
+#    July 17, 2026 internationally/Germany (already released in Japan,
+#    May 22, 2026). Same two-tier matching applies - the set keyword just
+#    needs a product-type term (Elite Trainer Box, Booster Display, Tin Box,
+#    Build & Battle Box, etc.) alongside it in the same card to count.
 #
 # IMPORTANT - two-tier keyword matching:
 #   `keywords`         - identifies the set itself (e.g. "30th Celebration").
@@ -45,6 +53,9 @@
 
 keywords: &keywords
   - "30th Celebration"
+  - "Dunkelnacht"
+  - "Pitch Black"
+  - "アビスアイ"
 
 product_keywords_intl: &product_keywords_intl
   - "Elite Trainer Box"
@@ -56,6 +67,9 @@ product_keywords_intl: &product_keywords_intl
   - "Double Deck Box"
   - "Sylveon ex"
   - "Greninja ex"
+  - "Mega Darkrai"
+  - "Build & Battle Box"
+  - "Tin Box"
   # German TCG specialty shops sometimes use older/local product-type
   # terms instead of the English ones above (e.g. "Top-Trainer-Box" was
   # the pre-2023 German name for what's now "Elite Trainer Box", and

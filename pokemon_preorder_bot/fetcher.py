@@ -14,15 +14,43 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
-# Common cookie-consent/region-interstitial buttons that would otherwise sit
-# on top of the real content on a first visit (no cookies carried between
-# runs). Best-effort: clicked if found within a couple seconds, ignored
-# otherwise - a missed banner just means the existing text heuristics have to
-# work around it, same as before this existed.
-_CONSENT_BUTTON_TEXTS = [
-    "Accept All", "Accept all", "Accept", "I Agree", "Agree",
+# Cookie-consent/region-interstitial buttons that would otherwise sit on top
+# of the real content on a first visit (no cookies carried between runs).
+# Best-effort: clicked if found within a couple seconds, ignored otherwise -
+# a missed banner just means the existing text heuristics have to work
+# around it, same as before this existed.
+#
+# Specific phrases are safe to click anywhere on the page - they're
+# unambiguous consent-dialog wording, unlikely to appear as an unrelated
+# button elsewhere.
+_SPECIFIC_CONSENT_TEXTS = [
+    "Accept All", "Accept all", "I Agree",
     "Alle akzeptieren", "Akzeptieren", "Ich stimme zu", "Zustimmen",
     "すべて同意する", "同意する",
+]
+
+# Generic phrases (also covers region-selector splash screens - Pokémon
+# Center shows a "Choose Your Region" interstitial on a first visit) are
+# common enough elsewhere on a normal page (e.g. a "Continue shopping"
+# button) that clicking one blindly risks navigating away from the page we
+# actually want to read. Only clicked if found *inside* something that looks
+# like a cookie/region overlay container - never a bare page-wide search.
+# Deliberately no country names here either, since clicking the wrong one
+# would silently show the wrong region's stock/pricing rather than just
+# being a missed dismissal.
+_OVERLAY_ONLY_TEXTS = [
+    "Accept", "Agree", "Continue", "Confirm", "Stay on this site",
+    "Weiter", "Bestätigen", "Auf dieser Seite bleiben",
+    "続ける", "確認",
+]
+
+_OVERLAY_CONTAINER_SELECTORS = [
+    '[class*="cookie" i]', '[id*="cookie" i]',
+    '[class*="consent" i]', '[id*="consent" i]',
+    '[class*="gdpr" i]',
+    '[class*="region-select" i]', '[class*="locale-select" i]',
+    '[class*="country-select" i]',
+    '[role="dialog"]',
 ]
 
 # schema.org JSON-LD availability aside, locale mainly affects which
@@ -88,7 +116,7 @@ def playwright_browser():
 
 
 def _dismiss_consent_banner(page) -> None:
-    for text in _CONSENT_BUTTON_TEXTS:
+    for text in _SPECIFIC_CONSENT_TEXTS:
         try:
             button = page.get_by_text(text, exact=False).first
             if button.is_visible(timeout=500):
@@ -97,6 +125,23 @@ def _dismiss_consent_banner(page) -> None:
                 return
         except Exception:  # noqa: BLE001 - purely best-effort, never fatal
             continue
+
+    for selector in _OVERLAY_CONTAINER_SELECTORS:
+        try:
+            container = page.locator(selector).first
+            if not container.is_visible(timeout=300):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        for text in _OVERLAY_ONLY_TEXTS:
+            try:
+                button = container.get_by_text(text, exact=False).first
+                if button.is_visible(timeout=300):
+                    button.click(timeout=1000)
+                    page.wait_for_timeout(300)
+                    return
+            except Exception:  # noqa: BLE001
+                continue
 
 
 def _fetch_rendered_once(browser, url: str, wait_ms: int, timeout_ms: int) -> str:
@@ -107,16 +152,28 @@ def _fetch_rendered_once(browser, url: str, wait_ms: int, timeout_ms: int) -> st
         locale=locale,
         extra_http_headers={"Accept-Language": accept_language},
     )
+    # `navigator.webdriver` is the single most common tell-tale automated
+    # browsers leave behind - some bot-detection challenges (Cloudflare,
+    # PerimeterX) specifically probe for it and serve a permanent block/
+    # CAPTCHA to sessions that fail this check, regardless of anything else
+    # about the request. Hiding it doesn't guarantee passing those checks,
+    # but leaving it as-is guarantees failing the ones that look for it.
+    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     try:
-        page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+        response = page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+        if response is not None and response.status >= 400:
+            raise RuntimeError(f"HTTP {response.status} {response.status_text}".strip())
         _dismiss_consent_banner(page)
         page.wait_for_timeout(wait_ms)
-        # Nudge lazy-loaded product grids into loading before we read the DOM.
-        try:
-            page.mouse.wheel(0, 2000)
-            page.wait_for_timeout(1000)
-        except Exception:  # noqa: BLE001 - best-effort only
-            pass
+        # Nudge lazy-loaded/infinite-scroll product grids into loading
+        # before we read the DOM - two passes since a single scroll often
+        # only triggers the *next* batch's loading spinner, not its content.
+        for _ in range(2):
+            try:
+                page.mouse.wheel(0, 2000)
+                page.wait_for_timeout(800)
+            except Exception:  # noqa: BLE001 - best-effort only
+                break
         return page.content()
     finally:
         page.close()

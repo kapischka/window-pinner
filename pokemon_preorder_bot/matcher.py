@@ -69,6 +69,26 @@ _BLOCKED_PHRASES = (
     "ddos protection by cloudflare",
 )
 
+# A page that comes back nearly empty of text is usually a blank
+# single-page-app shell that never finished hydrating, or a minimal server
+# error page - either would otherwise silently look identical to a
+# legitimate "nothing listed yet" (no_match). Deliberately low: a genuine
+# "No results for your search" message is itself short (and completely
+# legitimate - it should be a plain no_match, not "blocked"), so this only
+# needs to catch pages with essentially *no* real text at all, not merely
+# a brief one.
+MIN_PAGE_TEXT_LEN = 25
+
+# Signals that a listing spans more than one page - if nothing matched on
+# page 1 but this fires, "no_match" could just mean the product is on page 2+
+# rather than genuinely absent from the site.
+_PAGINATION_PATTERNS = (
+    re.compile(r'rel=["\']next["\']', re.IGNORECASE),
+    re.compile(r'\bnext\s*page\b', re.IGNORECASE),
+    re.compile(r'\bn[aä]chste\s*seite\b', re.IGNORECASE),
+    re.compile(r'\bweitere\s*ergebnisse\b', re.IGNORECASE),
+)
+
 
 @dataclass
 class MatchResult:
@@ -93,6 +113,11 @@ def find_blocked_phrase(html: str) -> tuple[str, str] | None:
             end = min(len(text), match.end() + 80)
             snippet = re.sub(r"\s+", " ", text[start:end]).strip()
             return phrase, snippet
+
+    stripped = re.sub(r"\s+", " ", text).strip()
+    if len(stripped) < MIN_PAGE_TEXT_LEN:
+        return "page has almost no text content", stripped or "(completely empty)"
+
     return None
 
 
@@ -100,6 +125,13 @@ def looks_blocked(html: str) -> bool:
     """Best-effort check for a bot-detection/CAPTCHA page - see
     `find_blocked_phrase` for the phrase actually matched."""
     return find_blocked_phrase(html) is not None
+
+
+def has_next_page(html: str) -> bool:
+    """Best-effort check for pagination (a rel="next" link, or common
+    "next page"/"nächste Seite" text) - used to note that a "no_match"
+    result might just mean the product is on page 2+, not genuinely absent."""
+    return any(pattern.search(html) for pattern in _PAGINATION_PATTERNS)
 
 
 def _page_text(html: str) -> str:
