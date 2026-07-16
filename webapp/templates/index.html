@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Pokémon Preorder Bot{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <div class="panel-row">
+    <div>
+      <h1>Dashboard</h1>
+      {% if last_run %}
+        <p class="muted">Last check: {{ last_run.strftime("%Y-%m-%d %H:%M:%S") }} (local time)</p>
+      {% else %}
+        <p class="muted">No check has been run yet.</p>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <form method="post" action="{{ url_for('trigger_run') }}">
+        <button type="submit" class="btn btn-primary">Run check now</button>
+      </form>
+      <form method="post" action="{{ url_for('test_notify') }}">
+        <button type="submit" class="btn">Send test notification</button>
+      </form>
+    </div>
+  </div>
+  <p class="muted small">A check fetches every enabled target and can take a minute or two, especially for
+    JavaScript-rendered sites - the page will just look like it's loading until it's done.</p>
+</section>
+
+{% if not groups %}
+  <section class="panel">
+    <p>No results yet. Click <strong>Run check now</strong> above to check all enabled targets.</p>
+  </section>
+{% endif %}
+
+<section class="grid">
+  {% for group in groups %}
+    <div class="card">
+      <div class="card-head">
+        <span class="retailer">{{ group.retailer }}</span>
+        <a class="card-link" href="{{ group.url }}" target="_blank" rel="noopener">open site ↗</a>
+      </div>
+      <div class="target-name">{{ group.target }}</div>
+      {% for row in group.rows %}
+        <div class="status-row">
+          <span class="badge badge-{{ row.status }}">{{ row.status }}</span>
+          {% if row.keyword %}<span class="keyword">{{ row.keyword }}</span>{% endif %}
+          {% if row.detail %}<div class="detail">{{ row.detail }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+</section>
+
+{% endblock %}

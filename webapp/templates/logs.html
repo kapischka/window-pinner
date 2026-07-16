@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Logs - Pokémon Preorder Bot{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <div class="panel-row">
+    <h1>Logs</h1>
+    <a class="btn" href="{{ url_for('logs_page') }}">Refresh</a>
+  </div>
+  <p class="muted small">Showing the last {{ lines | length }} line(s) of <code>{{ log_path }}</code>.</p>
+</section>
+
+<section class="panel">
+  {% if lines %}
+    <pre class="log">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+    <p>No log output yet - run a check from the Dashboard first.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

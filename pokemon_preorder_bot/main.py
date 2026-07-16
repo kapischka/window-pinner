@@ -49,6 +49,12 @@ def run(args: argparse.Namespace) -> None:
     summary = []
 
     for target in targets:
+        if not target.enabled:
+            summary.append(
+                {"target": target.name, "retailer": target.retailer, "url": target.url, "status": "disabled", "detail": "target disabled in config"}
+            )
+            continue
+
         logger.info("Checking %s (%s)", target.name, target.url)
         try:
             html = fetch(target.url, target.render)

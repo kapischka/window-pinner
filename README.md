@@ -72,6 +72,38 @@ If a notification backend isn't available, alerts still always get written
 to `data/bot.log` and `data/latest_results.json` as a fallback — check
 those if you don't trust notifications alone.
 
+## Web dashboard
+
+A local Flask app gives you a visual view and lets you manage everything
+without touching YAML or the CLI by hand:
+
+```bash
+source .venv/bin/activate
+python -m webapp.app
+```
+
+Open **http://127.0.0.1:5000** (binds to localhost only). From there you can:
+
+- **Dashboard** — see every target's last-known status as a color-coded card
+  (available / unavailable / unknown / error / disabled), with the matched
+  text snippet and a link to the site. "Run check now" triggers a full check
+  on demand (takes ~1-2 minutes for all rendered sites); "Send test
+  notification" verifies desktop notifications work on your machine.
+- **Manage Targets** — add a new site, edit an existing one's URL/keywords/
+  status phrases, enable/disable a target without deleting it, or delete it
+  entirely. Changes are saved straight to `config/targets.yaml`.
+- **Logs** — tail the last ~300 lines of `data/bot.log`.
+
+The dashboard and the `python -m pokemon_preorder_bot.main` CLI read/write
+the same `config/targets.yaml` and `data/` files, so a cron job and the web
+UI stay in sync automatically — use the UI to manage targets and glance at
+results, and cron/Task Scheduler to keep checks running in the background.
+
+Note: saving any change via **Manage Targets** rewrites `config/targets.yaml`
+in full, which drops the descriptive header comments at the top of the
+shipped file (the settings themselves, including the shared keyword lists,
+are preserved).
+
 ## Scheduling it
 
 **cron (Linux/macOS)** — every 20 minutes, log any crashes to a separate file:
@@ -115,12 +147,13 @@ target so you can sanity check a result yourself before acting on it.
 ```
 config/targets.yaml           # sites to watch — edit this to add/remove targets
 pokemon_preorder_bot/
-  config.py                   # loads targets.yaml
+  config.py                   # loads/saves targets.yaml
   fetcher.py                  # static (requests) + JS-rendered (playwright) page fetching
   matcher.py                  # keyword + availability-status detection
   state.py                    # remembers last status per (target, keyword) to dedupe alerts
   notifier.py                 # desktop notification + logging
   main.py                     # CLI entry point
+webapp/                       # local Flask dashboard (see "Web dashboard" above)
 data/                         # state.json, latest_results.json, bot.log (gitignored)
 tests/                        # matcher unit tests
 ```

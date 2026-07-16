@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Manage Targets - Pokémon Preorder Bot{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <h1>Manage Targets</h1>
+  <p class="muted small">Disabling a target keeps it in the list but skips it on the next check. Editing or
+    saving here rewrites <code>config/targets.yaml</code> - the shipped comments/shared keyword lists get
+    expanded into plain per-target lists, but nothing functional is lost.</p>
+</section>
+
+<section class="panel">
+  {% for t in targets %}
+  <details class="target-item {{ 'disabled' if not t.enabled }}">
+    <summary>
+      <span class="badge {{ 'badge-available' if t.enabled else 'badge-disabled' }}">{{ 'enabled' if t.enabled else 'disabled' }}</span>
+      <strong>{{ t.retailer }}</strong> — {{ t.name }}
+      <span class="muted small">({{ t.id }})</span>
+    </summary>
+
+    <form method="post" action="{{ url_for('update_target', target_id=t.id) }}" class="target-form">
+      <label>Name
+        <input type="text" name="name" value="{{ t.name }}" required>
+      </label>
+      <label>Retailer
+        <input type="text" name="retailer" value="{{ t.retailer }}" required>
+      </label>
+      <label>URL
+        <input type="url" name="url" value="{{ t.url }}" required>
+      </label>
+      <label>Type
+        <select name="type">
+          <option value="search_page" {{ "selected" if t.type == "search_page" }}>search_page (listing/search results)</option>
+          <option value="product_page" {{ "selected" if t.type == "product_page" }}>product_page (single product URL)</option>
+        </select>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="render" {{ "checked" if t.render }}>
+        Needs a real browser to render (JavaScript storefront)
+      </label>
+      <label>Keywords (one per line)
+        <textarea name="keywords" rows="6">{{ t.keywords | join("\n") }}</textarea>
+      </label>
+      <label>Available-status phrases (one per line)
+        <textarea name="available_patterns" rows="4">{{ t.available_patterns | join("\n") }}</textarea>
+      </label>
+      <label>Unavailable-status phrases (one per line)
+        <textarea name="unavailable_patterns" rows="4">{{ t.unavailable_patterns | join("\n") }}</textarea>
+      </label>
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Save changes</button>
+      </div>
+    </form>
+
+    <div class="actions">
+      <form method="post" action="{{ url_for('toggle_target', target_id=t.id) }}">
+        <button type="submit" class="btn">{{ "Disable" if t.enabled else "Enable" }}</button>
+      </form>
+      <form method="post" action="{{ url_for('delete_target', target_id=t.id) }}"
+            onsubmit="return confirm('Delete target {{ t.id }}? This cannot be undone.');">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+
+<section class="panel">
+  <h2>Add a new target</h2>
+  <form method="post" action="{{ url_for('add_target') }}" class="target-form">
+    <label>ID (unique, lowercase, no spaces)
+      <input type="text" name="id" pattern="[a-z0-9_\-]+" required placeholder="e.g. zavvi_de_search">
+    </label>
+    <label>Name
+      <input type="text" name="name" required placeholder="e.g. Zavvi.de – 30th Celebration search">
+    </label>
+    <label>Retailer
+      <input type="text" name="retailer" required placeholder="e.g. Zavvi (DE)">
+    </label>
+    <label>URL
+      <input type="url" name="url" required placeholder="https://...">
+    </label>
+    <label>Type
+      <select name="type">
+        <option value="search_page">search_page (listing/search results)</option>
+        <option value="product_page">product_page (single product URL)</option>
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="render" checked>
+      Needs a real browser to render (JavaScript storefront)
+    </label>
+    <label>Keywords (one per line)
+      <textarea name="keywords" rows="6">{{ default_keywords }}</textarea>
+    </label>
+    <label>Available-status phrases (one per line)
+      <textarea name="available_patterns" rows="4">{{ default_available }}</textarea>
+    </label>
+    <label>Unavailable-status phrases (one per line)
+      <textarea name="unavailable_patterns" rows="4">{{ default_unavailable }}</textarea>
+    </label>
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Add target</button>
+    </div>
+  </form>
+</section>
+
+{% endblock %}
