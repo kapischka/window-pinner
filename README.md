@@ -82,7 +82,18 @@ source .venv/bin/activate
 python -m webapp.app
 ```
 
-Open **http://127.0.0.1:5000** (binds to localhost only). From there you can:
+Open **http://127.0.0.1:5000** (binds to localhost only) in a browser **on the
+same machine you ran that command on**. If port 5000 is already taken by
+something else on your computer (common on macOS, where AirPlay Receiver
+listens on 5000 - Firefox/Chrome will show a `403 Forbidden` right from the
+process squatting the port, not from this app), run it on a different port
+instead:
+
+```bash
+PORT=5050 python -m webapp.app   # then open http://127.0.0.1:5050
+```
+
+From there you can:
 
 - **Dashboard** — see every target's last-known status as a color-coded card
   (available / unavailable / unknown / error / disabled), with the matched
