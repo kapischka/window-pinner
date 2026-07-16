@@ -14,8 +14,14 @@ way, it only detects and alerts — it never places an order for you.
 Preloaded in [`config/targets.yaml`](config/targets.yaml), focused on
 Germany, international, and Japan (no US local-store chains):
 
-- **Germany:** Pokémon Center Germany (`pokemoncenter.com/de-de`),
-  Amazon.de, MediaMarkt.de, Otto.de.
+- **Germany (general retail):** Pokémon Center Germany
+  (`pokemoncenter.com/de-de`), Amazon.de, MediaMarkt.de, Otto.de.
+- **Germany (TCG specialty shops):** JK-Entertainment, Games-Island
+  (covers both "Game-Island" and "Gamesisland" — same shop, `games-island.eu`),
+  Card-Corner, Trader-Online (TRADER), Gate to the Games, cardcosmos
+  (whose `tcg-vorbestellung` collection page is *already* preorder-scoped —
+  probably the single most useful target in the whole list), TCGViert,
+  TOPTCG.de, TCG-Trade.
 - **International:** Pokémon Center (`en-us`), Amazon.com.
 - **Japan:** Pokémon Center Japan's 30th-anniversary feature page
   (`pokemoncenter-online.com`), Amazon.co.jp. Japan's release is partly
@@ -31,7 +37,22 @@ bot-detection (Akamai/PerimeterX/Cloudflare). Even rendering with a real
 browser, these can occasionally return a CAPTCHA/blocked page instead of the
 real one — treat hits/misses on those as best-effort, and don't shorten the
 polling interval to compensate (see "Etiquette" below). The official
-Pokémon Center sites and MediaMarkt/Otto are generally more reliable.
+Pokémon Center sites, MediaMarkt/Otto, and the smaller TCG specialty shops
+are generally more reliable — smaller shops in particular tend to run much
+lighter bot-detection than Amazon/big-box retail.
+
+**On verifying this actually works against every listed site:** the URLs
+above are real (each was confirmed to exist via web research while adding
+it), and the matching logic is covered by unit tests against realistic page
+fixtures — but I cannot personally load these pages from where I run, since
+outbound network access here is sandboxed and blocks exactly this kind of
+request. So: correct URLs and correct matching logic, verified separately,
+but never combined into one live end-to-end check against the real sites.
+The first `python -m pokemon_preorder_bot.main` run on your own machine
+*is* that missing check. If a target comes back `error` repeatedly (see
+`data/bot.log` for the reason) or `no_match` when you can see the product
+listed with your own eyes, that's useful signal — tell me which target and
+what the page actually shows, and the URL or selectors can be adjusted.
 
 ## Setup
 
@@ -261,7 +282,12 @@ tests/                        # matcher unit tests
 - **Tighten or loosen matching:** adjust `product_keywords` per target — add
   more product-type terms to catch more listings, or leave it empty to match
   on the set keyword alone (useful for a page that's already 100% dedicated
-  to this release, like the Pokémon Center Japan feature page).
+  to this release, like the Pokémon Center Japan feature page or cardcosmos'
+  preorder collection). The shared `product_keywords_intl` list already
+  includes both the current English product names and older/German shop
+  terms (`Top-Trainer-Box`, `Booster Display`, `36er Display`,
+  `Sammelkoffer`) since the TCG specialty shops don't always use the same
+  wording as Amazon/MediaMarkt.
 - **Change notification channel:** Discord is already built in (see
   `DISCORD_WEBHOOK_URL` above) — for email/Telegram/something else, add a
   call next to `_notify_discord()` in `pokemon_preorder_bot/notifier.py`.

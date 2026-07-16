@@ -56,6 +56,17 @@ product_keywords_intl: &product_keywords_intl
   - "Double Deck Box"
   - "Sylveon ex"
   - "Greninja ex"
+  # German TCG specialty shops sometimes use older/local product-type
+  # terms instead of the English ones above (e.g. "Top-Trainer-Box" was
+  # the pre-2023 German name for what's now "Elite Trainer Box", and
+  # "Display"/"Sammelkoffer" are common German shop terms for the same
+  # sealed products) - kept alongside the English terms, not instead of.
+  - "Top Trainer Box"
+  - "Top-Trainer-Box"
+  - "Booster Display"
+  - "36er Display"
+  - "Sammelkoffer"
+  - "Collector Chest"
 
 product_keywords_jp: &product_keywords_jp
   - "拡張パック"
@@ -151,6 +162,119 @@ targets:
     name: "Otto.de – Pokémon 30th Celebration search"
     retailer: "Otto (DE)"
     url: "https://www.otto.de/suche/pokemon%2030th%20celebration/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  # --- Germany: TCG specialty retailers ----------------------------------
+  # Smaller card-game specialty shops - generally less aggressive
+  # bot-detection than Amazon/big-box retail, and several of them (the
+  # Shopify-based ones especially) tend to emit schema.org Product JSON-LD
+  # by default, which this bot's matcher already prefers when present.
+  - id: jk_entertainment_de
+    name: "JK-Entertainment – Pokémon"
+    retailer: "JK-Entertainment (DE)"
+    url: "https://jk-entertainment.de/pokemon/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: games_island_eu
+    name: "Games-Island – Pokémon"
+    retailer: "Games-Island (DE)"
+    url: "https://games-island.eu/en/c/Pokemon"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: card_corner_de
+    name: "Card-Corner – Pokémon Karten"
+    retailer: "Card-Corner (DE)"
+    url: "https://www.card-corner.de/pokemon-karten"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: trader_online_de
+    name: "Trader-Online – Pokémon Displays & Boxes"
+    retailer: "TRADER (trader-online.de)"
+    url: "https://trader-online.de/en/pokemon/displays-boxes/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: gate_to_the_games_de
+    name: "Gate to the Games – Pokémon Karten"
+    retailer: "Gate to the Games (DE)"
+    url: "https://www.gate-to-the-games.de/Pokemon-Karten/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: cardcosmos_de
+    name: "cardcosmos – TCG Vorbestellung"
+    retailer: "cardcosmos (DE)"
+    url: "https://cardcosmos.de/collections/tcg-vorbestellung"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: tcgviert_com
+    name: "TCGViert – Pokémon (Deutsch)"
+    retailer: "TCGViert (DE)"
+    url: "https://tcgviert.com/collections/pokemon-deutsch"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: toptcg_de
+    name: "TOPTCG.de"
+    retailer: "TOPTCG.de (DE)"
+    url: "https://www.toptcg.de/"
+    type: search_page
+    render: true
+    keywords: *keywords
+    product_keywords: *product_keywords_intl
+    preorder_patterns: *preorder_patterns
+    in_stock_patterns: *in_stock_patterns
+    unavailable_patterns: *unavailable_patterns
+
+  - id: tcg_trade_de
+    name: "TCG-Trade – Pokémon Store"
+    retailer: "TCG-Trade (DE)"
+    url: "https://tcg-trade.de/c/pokemon-store"
     type: search_page
     render: true
     keywords: *keywords
