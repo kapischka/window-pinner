@@ -14,6 +14,10 @@
 #   woocommerce  - queries the public Store API /wp-json/wc/store/v1/products.
 #   html         - downloads `pages` and `search_url` (with {q} replaced by
 #                  each query) and reads JSON-LD, microdata or card text.
+#                  A page that fails is skipped as long as another one works.
+#   auto         - probes Shopify and WooCommerce on the first poll and then
+#                  behaves like the detected one. For shops whose platform
+#                  isn't known for sure.
 #
 # language: assumed edition when a title has no hint ("Japanisch", "DE",
 #           "M6a", "30 Jahre" …). "?" means unknown.
@@ -79,7 +83,7 @@ shops:
   - name: cardcosmos
     platform: shopify
     url: "https://cardcosmos.de"
-    collections: [pokemon-30th-celebration-vorbestellen, pre-order-the-pokemon-30th-celebration]
+    collections: [pokemon-30th-celebration, pokemon-30th-celebration-vorbestellen, pre-order-the-pokemon-30th-celebration]
   - name: Yonko TCG
     platform: shopify
     url: "https://yonko-tcg.de"
@@ -115,6 +119,29 @@ shops:
   - name: TCGViert
     platform: shopify
     url: "https://tcgviert.com"
+  - name: Feenturm
+    platform: shopify
+    url: "https://feenturm.de"
+  - name: Schatztruhe
+    platform: shopify
+    url: "https://schatztruhe-shop.de"
+  - name: Racoon Rises
+    platform: shopify
+    url: "https://racoon-rises.com"
+  - name: Spiel-es
+    platform: shopify
+    url: "https://spiel-es.de"
+    collections: [vorbestellungen, pokemon-kollektionen]
+  - name: Geeks Heaven
+    platform: shopify
+    url: "https://geeksheaven.de"
+  - name: Just Nerds TCG
+    platform: shopify
+    url: "https://justnerdstcg.de"
+  - name: Fantasia Cards
+    platform: shopify
+    url: "https://fantasiacards.de"
+    collections: [30th-celebration]
 
   # --- WooCommerce -------------------------------------------------------
   - name: Zambomba
@@ -123,12 +150,23 @@ shops:
   - name: Shinyhit
     platform: woocommerce
     url: "https://shinyhit.com"
+  - name: KEEPSEVEN
+    platform: woocommerce
+    url: "https://keepseven.de"
+
+  # --- Platform not known for sure -----------------------------------------
+  - name: TCG-Love
+    platform: auto
+    url: "https://tcg-love.de"
 
   # --- HTML (JTL, Shopware and others) -----------------------------------
   - name: Card-Corner
     platform: html
     url: "https://www.card-corner.de"
-    pages: ["https://www.card-corner.de/pokemon-30th-celebration-japanisch"]
+    pages:
+      - "https://www.card-corner.de/pokemon-30th-celebration-japanisch"
+      - "https://www.card-corner.de/pokemon-30th-celebration"
+      - "https://www.card-corner.de/pokemon-30-jahre"
     search_url: "https://www.card-corner.de/?qs={q}"
   - name: Gate to the Games
     platform: html
@@ -154,6 +192,10 @@ shops:
   - name: Comicplanet
     platform: html
     url: "https://www.comicplanet.de"
+    pages:
+      - "https://www.comicplanet.de/sammelkarten/pokemon/deutsch/top-trainer-boxen-pkm/"
+      - "https://www.comicplanet.de/sammelkarten/pokemon/deutsch/specials-pkm/"
+      - "https://www.comicplanet.de/sammelkarten/pokemon/deutsch/displays-pkm/booster-pkm/"
     search_url: "https://www.comicplanet.de/search?sSearch={q}"
 
   # --- General retail (single product pages, stricter bot checks) ---------

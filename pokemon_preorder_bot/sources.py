@@ -12,9 +12,10 @@ from __future__ import annotations
 import html as html_lib
 import logging
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Callable
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -50,7 +51,7 @@ class Listing:
 @dataclass
 class Shop:
     name: str
-    platform: str  # shopify | woocommerce | html
+    platform: str  # shopify | woocommerce | html | auto
     url: str
     queries: list[str] = field(default_factory=list)
     collections: list[str] = field(default_factory=list)  # shopify only
@@ -76,11 +77,17 @@ class PollError(Exception):
         self.retry_after = retry_after
 
 
+_TRACKING_PARAM = re.compile(r"^(_.*|utm_.*|srsltid|shpxid|lang|ref|fbclid|gclid)$", re.IGNORECASE)
+
+
 def canonical_url(url: str) -> str:
-    """Drops query/fragment (Shopify appends tracking like ?_pos=1) and a
-    trailing slash so the same product always maps to the same key."""
+    """Drops tracking parameters (Shopify appends ?_pos=1&_sid=…), the
+    fragment and a trailing slash so the same product always maps to the
+    same key. Other parameters stay: some shops identify products by them
+    (index.php?a=123)."""
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/") or "/", "", ""))
+    query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query) if not _TRACKING_PARAM.match(k)))
+    return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/") or "/", query, ""))
 
 
 def _format_euro(amount: float) -> str:
@@ -181,9 +188,14 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
         if listing.title and listing.url not in found:
             found[listing.url] = listing
 
-    for block in extract_jsonld_product_blocks(html):
+    blocks = extract_jsonld_product_blocks(html)
+    for block in blocks:
         offer = first_offer(block)
-        url = block.get("url") or offer.get("url") or page_url
+        url = block.get("url") or offer.get("url")
+        if not url:
+            if len(blocks) > 1:
+                continue  # can't tell which listing it belongs to, the card fallback below can
+            url = page_url  # a product page describing itself
         add(
             Listing(
                 title=html_lib.unescape(str(block.get("name", ""))).strip(),
@@ -276,12 +288,40 @@ def _json(resp: requests.Response):
         raise PollError(f"no JSON from {resp.url} - is the platform setting right?") from exc
 
 
+def detect_platform(session: requests.Session, base_url: str) -> str:
+    """'shopify' or 'woocommerce', probed through their public JSON
+    endpoints. Raises PollError when neither answers."""
+    base = base_url.rstrip("/")
+    probes = (
+        ("shopify", f"{base}/search/suggest.json", {"q": "pokemon", "resources[type]": "product"}, dict, "resources"),
+        ("woocommerce", f"{base}/wp-json/wc/store/v1/products", {"per_page": 1}, list, None),
+    )
+    for platform, url, params, shape, key in probes:
+        try:
+            data = _get(session, url, params).json()
+        except PollError as exc:
+            if exc.blocked:
+                raise
+            continue
+        except ValueError:
+            continue
+        if isinstance(data, shape) and (key is None or key in data):
+            return platform
+    raise PollError(f"Plattform von {base} nicht erkannt, bitte platform: html mit search_url eintragen")
+
+
 def poll_shop(
     session: requests.Session, shop: Shop, accept: Callable[[str], bool], patterns: StatusPatterns
-) -> list[Listing]:
-    """Every listing the shop currently shows for its queries/pages, deduped by URL."""
+) -> tuple[list[Listing], bool]:
+    """Every listing the shop currently shows for its queries/pages, deduped
+    by URL, and whether every source answered (False when a page or
+    collection was skipped, so missing products prove nothing)."""
     base = shop.url.rstrip("/")
     listings: list[Listing] = []
+    complete = True
+    if shop.platform == "auto":
+        shop.platform = detect_platform(session, base)
+        logger.info("%s: Plattform erkannt: %s", shop.name, shop.platform)
 
     if shop.platform == "shopify":
         for handle in shop.collections:
@@ -292,6 +332,7 @@ def poll_shop(
                 if exc.blocked:
                     raise
                 _warn_once(f"{shop.name}: Kollektion {handle!r} übersprungen ({exc})")
+                complete = False
                 continue
             listings += parse_shopify_collection(_json(resp), base)
         for query in shop.queries:
@@ -310,12 +351,24 @@ def poll_shop(
         urls = list(shop.pages)
         if shop.search_url:
             urls += [shop.search_url.replace("{q}", requests.utils.quote(q)) for q in shop.queries]
+        failures = []
         for url in urls:
-            html = _get(session, url).text
+            try:
+                html = _get(session, url).text
+            except PollError as exc:
+                # One moved category page must not hide the others.
+                if exc.blocked:
+                    raise
+                failures.append(exc)
+                _warn_once(f"{shop.name}: {exc}")
+                complete = False
+                continue
             blocked = find_blocked_phrase(html)
             if blocked:
                 raise PollError(f'bot check on {url} (matched "{blocked[0]}")', blocked=True)
             listings += parse_html(html, url, accept, patterns)
+        if urls and len(failures) == len(urls):
+            raise failures[0]
     else:
         raise PollError(f"unknown platform {shop.platform!r}")
 
@@ -326,4 +379,4 @@ def poll_shop(
         prev = unique.get(listing.url)
         if prev is None or (listing.available and not prev.available):
             unique[listing.url] = listing
-    return list(unique.values())
+    return list(unique.values()), complete

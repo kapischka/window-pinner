@@ -10,10 +10,12 @@ from pokemon_preorder_bot.sources import (
     Shop,
     StatusPatterns,
     canonical_url,
+    detect_platform,
     parse_html,
     parse_shopify_collection,
     parse_shopify_suggest,
     parse_woocommerce,
+    poll_shop,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +39,8 @@ def accept(title: str) -> bool:
         ("30 Jahre Kollektion Feelinara-ex", "Pokémon", True),
         ("30 Jahre Kollektion Feelinara-ex", "", False),
         ("LEGO 30 Jahre Jubiläumsset", "", False),
+        ("Pokemon 30-Jahre Ordner", "", True),
+        ("Drehmaschine XM6A1", "", False),
         ("Pokémon Karmesin & Purpur Display", "", False),
     ],
 )
@@ -54,7 +58,15 @@ def test_is_30th(title, context, expected):
         ("Pokemon 30th Celebration Premium Deck Espeon & Umbreon (JP)", "JP"),
         ("30th CELEBRATION プレミアムデッキセット", "JP"),
         ("Pokémon 30th Celebration Elite Trainer Box (Englisch)", "EN"),
-        ("Pokémon 30th Celebration Elite Trainer Box", "?"),
+        ("Pokémon 30th Celebration Elite Trainer Box", "EN"),
+        ("Pokémon 30th Celebration Poster Collection", "EN"),
+        ("Pokemon 30 Jahre Poster-Kollektion", "DE"),
+        ("30th Celebration Futuristic Box", "JP"),
+        ("Japan Import 30th Celebration Booster", "JP"),
+        ("30th Celebration Booster Box Simplified Chinese", "OTHER"),
+        ("30th Celebration Display Koreanisch", "OTHER"),
+        ("포켓몬 30th Celebration", "OTHER"),
+        ("Pokémon 30th Celebration Booster", "?"),
     ],
 )
 def test_language(title, expected):
@@ -122,7 +134,7 @@ def test_parse_html_jsonld_product_page():
     {"@type": "Product", "name": "Pokémon TCG 30th CELEBRATION (M6a) Booster Display (Japanische Edition)",
      "offers": {"@type": "Offer", "price": "199.99", "availability": "https://schema.org/InStock"}}
     </script></head><body></body></html>"""
-    [listing] = parse_html(html, "https://www.netto-online.de/p-1?x=1", accept, PATTERNS)
+    [listing] = parse_html(html, "https://www.netto-online.de/p-1?_pos=1&utm_source=x", accept, PATTERNS)
     assert listing.available is True
     assert listing.url == "https://www.netto-online.de/p-1"
     assert listing.price == "199,99 €"
@@ -152,7 +164,61 @@ def test_parse_html_card_text_fallback_keeps_cards_apart():
 
 
 def test_canonical_url():
-    assert canonical_url("https://Shop.DE/products/x/?_pos=1#top") == "https://shop.de/products/x"
+    assert canonical_url("https://Shop.DE/products/x/?_pos=1&_sid=a&utm_medium=b#top") == "https://shop.de/products/x"
+    # Product ids in the query must survive, or every product of such a shop collapses into one.
+    assert canonical_url("https://shop.de/index.php?b=2&a=1&_pos=3") == "https://shop.de/index.php?a=1&b=2"
+
+
+def test_parse_html_ignores_urlless_jsonld_on_listing_pages():
+    block = '{"@type": "Product", "name": "%s", "offers": {"availability": "https://schema.org/InStock"}}'
+    html = (
+        '<script type="application/ld+json">[%s, %s]</script>'
+        % (block % "Pokémon 30th Celebration Display JP", block % "Pokémon 30 Jahre Top-Trainer-Box")
+    )
+    assert parse_html(html, "https://x.de/suche", accept, PATTERNS) == []
+
+
+class FakeResponse:
+    def __init__(self, status=200, payload=None, text=""):
+        self.status_code = status
+        self.headers = {}
+        self._payload = payload
+        self.text = text
+        self.url = "fake"
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+class FakeSession:
+    def __init__(self, routes):
+        self.routes = routes
+
+    def get(self, url, params=None, timeout=None):
+        return self.routes.get(url, FakeResponse(404))
+
+
+def test_html_shop_survives_one_broken_page():
+    shop = Shop(name="S", platform="html", url="https://s.de", pages=["https://s.de/alt", "https://s.de/neu"])
+    page = '<div class="product"><a href="/p">Pokemon 30 Jahre Poster-Kollektion</a><button>In den Warenkorb</button></div>'
+    session = FakeSession({"https://s.de/neu": FakeResponse(text=page)})
+    [listing], complete = poll_shop(session, shop, accept, PATTERNS)
+    assert listing.available is True
+    assert complete is False  # products of the broken page must not count as delisted
+
+    with pytest.raises(PollError):
+        poll_shop(FakeSession({}), shop, accept, PATTERNS)
+
+
+def test_auto_platform_detection():
+    session = FakeSession({"https://w.de/wp-json/wc/store/v1/products": FakeResponse(payload=[])})
+    assert detect_platform(session, "https://w.de/") == "woocommerce"
+    session = FakeSession({"https://s.de/search/suggest.json": FakeResponse(payload={"resources": {}})})
+    assert detect_platform(session, "https://s.de") == "shopify"
+    with pytest.raises(PollError):
+        detect_platform(FakeSession({}), "https://x.de")
 
 
 def _monitor(tmp_path, monkeypatch, listings):
@@ -160,7 +226,7 @@ def _monitor(tmp_path, monkeypatch, listings):
     shop = Shop(name="Testshop", platform="shopify", url="https://shop.de")
     monitor = LiveMonitor(settings, [shop], tmp_path / "state.json", tmp_path / "results.json", open_browser=False)
     feed = iter(listings)
-    monkeypatch.setattr(live, "poll_shop", lambda *args: next(feed))
+    monkeypatch.setattr(live, "poll_shop", lambda *args: (next(feed), True))
     return monitor, shop
 
 
@@ -192,6 +258,50 @@ def test_monitor_alerts_only_on_transition_and_filters(tmp_path, monkeypatch):
     assert (tmp_path / "results.json").exists()
 
 
+def test_monitor_marks_delisted_products_gone_and_realerts(tmp_path, monkeypatch):
+    ttb = Listing("Pokémon 30 Jahre Top-Trainer-Box Deutsch", "https://shop.de/products/ttb", True)
+    rounds = [[ttb]] + [[]] * live.MISSES_UNTIL_GONE + [[ttb]]
+    monitor, shop = _monitor(tmp_path, monkeypatch, rounds)
+
+    assert len(monitor.check(shop, None)) == 1
+    for _ in range(live.MISSES_UNTIL_GONE - 1):
+        monitor.check(shop, None)
+        assert monitor.products[ttb.url]["available"] is True
+    monitor.check(shop, None)
+    assert monitor.products[ttb.url]["available"] is False
+    assert len(monitor.check(shop, None)) == 1
+
+
+def test_monitor_turns_unexpected_errors_into_status(tmp_path, monkeypatch):
+    monitor, shop = _monitor(tmp_path, monkeypatch, [])
+
+    def broken(*args):
+        raise AttributeError("'list' object has no attribute 'get'")
+
+    monkeypatch.setattr(live, "poll_shop", broken)
+    with pytest.raises(PollError):
+        monitor.check(shop, None)
+    assert monitor.shop_status["Testshop"]["status"] == "error"
+
+
+def test_once_mode_does_not_persist_state(tmp_path, monkeypatch):
+    monitor, shop = _monitor(tmp_path, monkeypatch, [[Listing("30th Celebration Display JP", "https://shop.de/d", True)]])
+    monitor.persist_state = False
+    monitor.check(shop, None)
+    assert not (tmp_path / "state.json").exists()
+    assert (tmp_path / "results.json").exists()
+
+
+def test_load_config_rejects_bad_entries(tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("shops:\n  - {name: A, platform: magento, url: 'https://a.de'}\n")
+    with pytest.raises(ValueError, match="platform"):
+        load_config(bad)
+    bad.write_text("shops:\n  - {name: A, platform: shopify, url: 'https://a.de'}\n  - {name: A, platform: shopify, url: 'https://b.de'}\n")
+    with pytest.raises(ValueError, match="doppelt"):
+        load_config(bad)
+
+
 def test_monitor_records_poll_errors(tmp_path, monkeypatch):
     monitor, shop = _monitor(tmp_path, monkeypatch, [])
 
@@ -207,5 +317,16 @@ def test_monitor_records_poll_errors(tmp_path, monkeypatch):
 def test_shipped_config_loads():
     settings, shops = load_config(ROOT / "config" / "live_shops.yaml")
     assert settings.languages == {"DE", "JP"}
-    assert shops and all(s.platform in {"shopify", "woocommerce", "html"} for s in shops)
+    assert shops and all(s.platform in live.PLATFORMS for s in shops)
     assert all(s.queries for s in shops)
+
+
+def test_monitor_ignores_misses_on_partial_polls(tmp_path, monkeypatch):
+    ttb = Listing("Pokémon 30 Jahre Top-Trainer-Box Deutsch", "https://shop.de/products/ttb", True)
+    monitor, shop = _monitor(tmp_path, monkeypatch, [[ttb]])
+    monitor.check(shop, None)
+
+    monkeypatch.setattr(live, "poll_shop", lambda *args: ([], False))
+    for _ in range(live.MISSES_UNTIL_GONE + 1):
+        monitor.check(shop, None)
+    assert monitor.products[ttb.url]["available"] is True

@@ -38,6 +38,13 @@ MIN_INTERVAL = 3.0  # hard floor per shop, anything faster just gets an IP banne
 MAX_BACKOFF = 300.0
 JITTER = 0.2  # +-20 % so requests don't hit at a fingerprintable fixed rhythm
 MAX_ITEMS_PER_ALERT = 5
+# Polls in a row a known in-stock product may be missing from a shop's
+# results before it counts as gone. Many shops hide sold-out items from
+# search, so without this a product would stay "available" forever and
+# never alert again when it returns; one miss alone is often just ranking
+# noise in a capped result list.
+MISSES_UNTIL_GONE = 3
+PLATFORMS = {"shopify", "woocommerce", "html", "auto"}
 
 
 def _now() -> str:
@@ -46,7 +53,7 @@ def _now() -> str:
 
 class Settings:
     def __init__(self, raw: dict):
-        self.interval = float(raw.get("interval_seconds", 10))
+        self.interval = max(float(raw.get("interval_seconds", 10)), MIN_INTERVAL)
         self.languages = {lang.upper() for lang in raw.get("languages", ["DE", "JP"])}
         self.include_unknown_language = bool(raw.get("include_unknown_language", True))
         self.queries = list(raw.get("queries", []))
@@ -67,17 +74,36 @@ def load_config(path: str | Path) -> tuple[Settings, list[Shop]]:
         entry = dict(entry)
         entry.setdefault("queries", settings.queries)
         entry["language"] = str(entry.get("language", catalog.UNKNOWN_LANGUAGE)).upper()
-        shops.append(Shop(**entry))
+        try:
+            shop = Shop(**entry)
+        except TypeError as exc:
+            raise ValueError(f"Shop {entry.get('name', '?')!r} in {path}: {exc}") from exc
+        if shop.platform not in PLATFORMS:
+            raise ValueError(f"Shop {shop.name!r}: platform muss eins von {sorted(PLATFORMS)} sein")
+        if shop.platform == "html" and not (shop.pages or shop.search_url):
+            raise ValueError(f"Shop {shop.name!r}: html braucht pages oder search_url")
+        if any(s.name == shop.name for s in shops):
+            raise ValueError(f"Shop-Name {shop.name!r} ist doppelt")
+        shops.append(shop)
     return settings, shops
 
 
 class LiveMonitor:
-    def __init__(self, settings: Settings, shops: list[Shop], state_path: Path, results_path: Path, open_browser: bool):
+    def __init__(
+        self,
+        settings: Settings,
+        shops: list[Shop],
+        state_path: Path,
+        results_path: Path,
+        open_browser: bool = False,
+        persist_state: bool = True,
+    ):
         self.settings = settings
         self.shops = [s for s in shops if s.enabled]
         self.state_path = state_path
         self.results_path = results_path
         self.open_browser = open_browser
+        self.persist_state = persist_state
         self.lock = threading.Lock()
         self.stop = threading.Event()
         self.products: dict[str, dict] = self._load_state()
@@ -112,10 +138,15 @@ class LiveMonitor:
             return {}
 
     def _write_json(self, path: Path, data) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            # Windows refuses the replace while the dashboard is reading the
+            # file; the next poll writes it again a few seconds later.
+            logger.debug("could not write %s: %s", path, exc)
 
     def _save(self) -> None:
         """Caller holds self.lock."""
@@ -124,7 +155,8 @@ class LiveMonitor:
             (p for p in self.products.values() if p["shop"] in active),
             key=lambda p: (not p["available"], p["shop"], p["title"]),
         )
-        self._write_json(self.state_path, self.products)
+        if self.persist_state:
+            self._write_json(self.state_path, self.products)
         self._write_json(
             self.results_path,
             {"updated": _now(), "interval_seconds": self.settings.interval, "shops": self.shop_status, "products": products},
@@ -136,7 +168,12 @@ class LiveMonitor:
         """Polls one shop, records the result and returns the products that
         just became orderable."""
         try:
-            listings = poll_shop(session, shop, self._accept_title(shop), self.settings.patterns)
+            try:
+                listings, complete = poll_shop(session, shop, self._accept_title(shop), self.settings.patterns)
+            except PollError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - e.g. a shop answering with an unexpected JSON shape
+                raise PollError(f"{type(exc).__name__}: {exc}") from exc
         except PollError as exc:
             with self.lock:
                 self.shop_status[shop.name].update(
@@ -148,12 +185,12 @@ class LiveMonitor:
         now = _now()
         fresh: list[dict] = []
         with self.lock:
-            matched = 0
+            seen: set[str] = set()
             for listing in listings:
                 lang = self.wanted(shop, listing)
                 if lang is None:
                     continue
-                matched += 1
+                seen.add(listing.url)
                 prev = self.products.get(listing.url, {})
                 was_available = prev.get("available", False)
                 available = was_available if listing.available is None else listing.available
@@ -166,13 +203,21 @@ class LiveMonitor:
                     "available": available,
                     "since": prev.get("since", now) if available == was_available and prev else now,
                     "last_seen": now,
+                    "misses": 0,
                 }
                 self.products[listing.url] = record
                 if available and not was_available:
                     fresh.append(record)
                 elif was_available and not available:
                     logger.info("🔴 weg: [%s] %s bei %s", lang, listing.title, shop.name)
-            self.shop_status[shop.name].update(status="ok", detail=f"{matched} Treffer", last_check=now)
+            for url, record in self.products.items():
+                if not complete or record["shop"] != shop.name or url in seen or not record["available"]:
+                    continue
+                record["misses"] = record.get("misses", 0) + 1
+                if record["misses"] >= MISSES_UNTIL_GONE:
+                    record.update(available=False, since=now)
+                    logger.info("🔴 weg (nicht mehr gelistet): [%s] %s bei %s", record["language"], record["title"], shop.name)
+            self.shop_status[shop.name].update(status="ok", detail=f"{len(seen)} Treffer", last_check=now)
             self._save()
         return fresh
 
@@ -214,7 +259,7 @@ class LiveMonitor:
         logger.info(
             "Live-Monitor gestartet: %d Shops, alle %.0f s, Sprachen %s",
             len(self.shops),
-            max(self.settings.interval, MIN_INTERVAL),
+            self.settings.interval,
             "/".join(sorted(self.settings.languages)),
         )
         threads = [threading.Thread(target=self._shop_loop, args=(s,), name=s.name, daemon=True) for s in self.shops]
@@ -269,10 +314,12 @@ def main(argv=None) -> None:
     setup_logging(args.log)
     settings, shops = load_config(args.config)
     if args.interval:
-        settings.interval = args.interval
+        settings.interval = max(args.interval, MIN_INTERVAL)
     if args.languages:
         settings.languages = {lang.strip().upper() for lang in args.languages.split(",") if lang.strip()}
-    monitor = LiveMonitor(settings, shops, Path(args.state), Path(args.results), args.open)
+    # --once is a look, not a baseline: it must not swallow the first alert
+    # of the live run that follows.
+    monitor = LiveMonitor(settings, shops, Path(args.state), Path(args.results), args.open, persist_state=not args.once)
     if args.once:
         monitor.run_once()
     else:

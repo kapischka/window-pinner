@@ -8,22 +8,46 @@ import re
 
 # Unique enough on their own: the set's international name ("30th
 # Celebration", also used verbatim in Japan) and the Japanese set code.
-STRONG_KEYWORDS = ("30th celebration", "m6a")
+_STRONG = re.compile(r"30th[\s-]*celebration|\bm6a\b", re.IGNORECASE)
 
 # Generic anniversary wording (German set name "30 Jahre"), trusted only when
 # the listing also mentions Pokémon somewhere, so "30 Jahre LEGO" or a
 # "30th Anniversary" plush on a general retailer doesn't count.
-WEAK_KEYWORDS = ("30 jahre", "30th anniversary", "30周年")
+_WEAK = re.compile(r"30[\s-]*jahre|30th[\s-]*anniversary|30周年", re.IGNORECASE)
 POKEMON_HINTS = ("pokemon", "pokémon", "ポケモン", "pkm", "pocket monsters")
 
-# Explicit language markers in a title win over anything implied.
-_JP_MARKER = re.compile(r"japanisch|japanese|\bjap\b|\bjpn?\b|日本語", re.IGNORECASE)
-_EN_MARKER = re.compile(r"englisch|english|\beng?\b", re.IGNORECASE)
-_DE_MARKER = re.compile(r"deutsch|german|\bde\b|\bger\b|\bdt\b", re.IGNORECASE)
-# Implied: Japanese script or the JP-only set code means a Japanese product,
-# the German set name means a German one.
-_JP_IMPLIED = re.compile(r"m6a|[぀-ヿ一-鿿]", re.IGNORECASE)
-_DE_IMPLIED = re.compile(r"30 jahre", re.IGNORECASE)
+# Explicit language markers in a title win over anything implied. Korean,
+# Chinese and the European editions are recognized so they can be dropped
+# instead of slipping through as "unknown" (Chinese titles share kanji with
+# Japanese ones).
+_LANGUAGE_MARKERS = (
+    ("JP", re.compile(r"japanisch|japanese|\bjapan\b|\bjap\b|\bjpn?\b|日本語", re.IGNORECASE)),
+    (
+        "OTHER",
+        re.compile(
+            r"korean|koreanisch|\bkor\b|\bkr\b|chinese|chinesisch|\b[st]-?chn?\b|\bcn\b|simplified|traditional"
+            r"|französisch|french|\bfra?\b|italienisch|italian|\bita\b|spanisch|spanish|\besp\b"
+            r"|portugiesisch|portuguese|\bthai\b|indonesisch|indonesian|[가-힯]",
+            re.IGNORECASE,
+        ),
+    ),
+    ("EN", re.compile(r"englisch|english|\beng?\b", re.IGNORECASE)),
+    ("DE", re.compile(r"deutsch|german|\bde\b|\bger\b|\bdt\b", re.IGNORECASE)),
+)
+
+# Implied by wording when no marker is present: kana, the JP-only set code
+# and the JP-only products (Futuristic Box, Premium Deck Set Espeon &
+# Umbreon, Card Sets) mean Japanese, the German product names mean German,
+# the English product names (which German shops keep for English stock)
+# mean English.
+_LANGUAGE_HINTS = (
+    (
+        "JP",
+        re.compile(r"\bm6a\b|[぀-ヿ]|futuristic|premium[\s-]*deck|espeon|umbreon|card[\s-]*set", re.IGNORECASE),
+    ),
+    ("DE", re.compile(r"30[\s-]*jahre|top[\s-]*trainer|kollektion|ordner|2er[\s-]*pack", re.IGNORECASE)),
+    ("EN", re.compile(r"elite[\s-]*trainer|\betb\b|collection|binder|2[\s-]*pack blister", re.IGNORECASE)),
+)
 
 UNKNOWN_LANGUAGE = "?"
 
@@ -36,9 +60,9 @@ def is_30th(title: str, context: str = "", assume_pokemon: bool = False) -> bool
     """True if the title names the 30th anniversary set. `context` is extra
     text (vendor, product type) used only to confirm it's a Pokémon item."""
     text = _normalize(title)
-    if any(k in text for k in STRONG_KEYWORDS):
+    if _STRONG.search(text):
         return True
-    if not any(k in text for k in WEAK_KEYWORDS):
+    if not _WEAK.search(text):
         return False
     if assume_pokemon:
         return True
@@ -47,17 +71,11 @@ def is_30th(title: str, context: str = "", assume_pokemon: bool = False) -> bool
 
 
 def language(title: str, default: str = UNKNOWN_LANGUAGE) -> str:
-    """'DE', 'JP', 'EN' or `default` when the title gives no hint."""
-    if _JP_MARKER.search(title):
-        return "JP"
-    if _EN_MARKER.search(title):
-        return "EN"
-    if _DE_MARKER.search(title):
-        return "DE"
-    if _JP_IMPLIED.search(title):
-        return "JP"
-    if _DE_IMPLIED.search(title):
-        return "DE"
+    """'DE', 'JP', 'EN', 'OTHER' or `default` when the title gives no hint."""
+    for patterns in (_LANGUAGE_MARKERS, _LANGUAGE_HINTS):
+        for lang, pattern in patterns:
+            if pattern.search(title):
+                return lang
     return default
 
 
