@@ -148,18 +148,18 @@ def _clean_soup(html: str) -> BeautifulSoup:
     return soup
 
 
-def _status_from_availability(value) -> str | None:
+def status_from_availability(value) -> str | None:
     if not value or not isinstance(value, str):
         return None
     token = value.rstrip("/").rsplit("/", 1)[-1].strip().lower()
     return _SCHEMA_AVAILABILITY_MAP.get(token)
 
 
-def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
-    """Pull (name, availability) pairs out of any schema.org Product/Offer
-    JSON-LD on the page. Most modern storefronts embed this for search
-    engines regardless of what JS framework renders the visible page, so
-    it's often available even when scraping a heavily client-rendered site.
+def extract_jsonld_product_blocks(html: str) -> list[dict]:
+    """Every schema.org Product block in the page's JSON-LD, including ones
+    nested in an @graph or an ItemList. Most modern storefronts embed these
+    for search engines regardless of what JS framework renders the visible
+    page, so they're often available even on heavily client-rendered sites.
     """
     soup = BeautifulSoup(html, "lxml")
     stack: list = []
@@ -173,7 +173,7 @@ def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
             continue
         stack.extend(data if isinstance(data, list) else [data])
 
-    products: list[tuple[str, str | None]] = []
+    blocks: list[dict] = []
     seen_ids = set()
     while stack:
         block = stack.pop()
@@ -190,25 +190,33 @@ def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
 
         type_ = block.get("@type")
         types_lower = {str(t).lower() for t in (type_ if isinstance(type_, list) else [type_]) if t}
-        if "product" not in types_lower:
-            continue
-
-        name = block.get("name") or ""
-        offers = block.get("offers")
-        availability = None
-        if isinstance(offers, dict):
-            availability = offers.get("availability")
-        elif isinstance(offers, list):
-            for offer in offers:
-                if isinstance(offer, dict) and offer.get("availability"):
-                    availability = offer["availability"]
-                    break
-        if name:
-            products.append((name, availability))
-    return products
+        if "product" in types_lower:
+            blocks.append(block)
+    return blocks
 
 
-def _find_card_container(text_node):
+def first_offer(block: dict) -> dict:
+    """The first Offer of a Product block that carries an availability, or
+    the first Offer at all, or an empty dict."""
+    offers = block.get("offers")
+    if isinstance(offers, dict):
+        return offers
+    if isinstance(offers, list):
+        dicts = [o for o in offers if isinstance(o, dict)]
+        return next((o for o in dicts if o.get("availability")), dicts[0] if dicts else {})
+    return {}
+
+
+def _extract_jsonld_products(html: str) -> list[tuple[str, str | None]]:
+    """(name, availability) pairs of every named JSON-LD Product on the page."""
+    return [
+        (block["name"], first_offer(block).get("availability"))
+        for block in extract_jsonld_product_blocks(html)
+        if block.get("name")
+    ]
+
+
+def find_card_container(text_node):
     """Walk up from a matched text node to the element that best represents
     its enclosing product card, so status/product-keyword text from a
     neighbouring - or completely unrelated - product on the same listing
@@ -255,7 +263,7 @@ def _find_card_container(text_node):
     return None
 
 
-def _classify_status(
+def classify_status(
     window: str,
     preorder_patterns: list[str],
     in_stock_patterns: list[str],
@@ -314,7 +322,7 @@ def match_search_page(
             continue
         if product_keywords and not _has_any(name_lower, product_keywords):
             continue
-        status = _status_from_availability(availability) or "unknown"
+        status = status_from_availability(availability) or "unknown"
         jsonld_results.append(
             MatchResult(keyword=f"{matched_keyword} — {name}", status=status, snippet=f"[structured data] {name} (availability: {availability})")
         )
@@ -327,7 +335,7 @@ def match_search_page(
         pattern = re.compile(re.escape(keyword), re.IGNORECASE)
         seen_containers = set()
         for text_node in soup.find_all(string=pattern):
-            container = _find_card_container(text_node)
+            container = find_card_container(text_node)
             if container is None:
                 continue
             if id(container) in seen_containers:
@@ -340,7 +348,7 @@ def match_search_page(
             if product_keywords and not matched_products:
                 continue
 
-            status = _classify_status(window, preorder_patterns, in_stock_patterns, unavailable_patterns)
+            status = classify_status(window, preorder_patterns, in_stock_patterns, unavailable_patterns)
             snippet = re.sub(r"\s+", " ", window)[: CONTEXT_WINDOW * 2].strip()
 
             # The label must uniquely identify *this card*, not just the set
@@ -369,7 +377,7 @@ def match_product_page(
         name_lower = name.lower()
         if keywords and not _has_any(name_lower, keywords):
             continue
-        status = _status_from_availability(availability)
+        status = status_from_availability(availability)
         if status:
             return MatchResult(keyword=target_name, status=status, snippet=f"[structured data] {name} (availability: {availability})")
 
@@ -383,6 +391,6 @@ def match_product_page(
             snippet=f"none of the expected keywords were found on this page - it may have moved. {snippet}",
         )
 
-    status = _classify_status(text, preorder_patterns, in_stock_patterns, unavailable_patterns)
+    status = classify_status(text, preorder_patterns, in_stock_patterns, unavailable_patterns)
     snippet = re.sub(r"\s+", " ", text)[:CONTEXT_WINDOW].strip()
     return MatchResult(keyword=target_name, status=status, snippet=snippet)

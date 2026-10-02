@@ -1,0 +1,173 @@
+# Shops for the live monitor (python -m pokemon_preorder_bot.live).
+#
+# Watches every product of the 30th anniversary set: German "30 Jahre"
+# (Top-Trainer-Box, Poster-, Tech-Sticker-, Ordner-, Knock-out-Kollektion,
+# 2er-Pack-Blister, Feelinara-ex / Quajutsu-ex Kollektion, Booster Bundle …)
+# and Japanese "30th CELEBRATION" (M6a Display, Premium Deck Set Espeon &
+# Umbreon, FUTURISTIC BOX, Card Sets …). Matching is done on the product
+# title, so new products are picked up without touching this file.
+#
+# platform:
+#   shopify      - queries /search/suggest.json and, if given, the
+#                  /collections/<handle>/products.json of each collection.
+#                  Tiny JSON responses, the fastest and most reliable source.
+#   woocommerce  - queries the public Store API /wp-json/wc/store/v1/products.
+#   html         - downloads `pages` and `search_url` (with {q} replaced by
+#                  each query) and reads JSON-LD, microdata or card text.
+#
+# language: assumed edition when a title has no hint ("Japanisch", "DE",
+#           "M6a", "30 Jahre" …). "?" means unknown.
+# assume_pokemon: the page only lists Pokémon products, so generic wording
+#           like "30 Jahre" counts even without "Pokémon" in the title.
+# interval: per-shop override of settings.interval_seconds.
+#
+# All URLs come from web research (Oct 2026). Run `--once` after changes: a
+# shop showing `error` has a wrong platform/URL, `blocked` means it rate
+# limits or runs a bot check, so give it a larger interval.
+
+settings:
+  interval_seconds: 10
+  languages: [DE, JP]
+  include_unknown_language: true
+  queries:
+    - "30th celebration"
+    - "30 jahre"
+    - "m6a"
+  exclude:
+    - "einzelkarte"
+    - "single card"
+    - "psa "
+    - " cgc"
+    - "graded"
+    - "grading"
+    - "leeres display"
+    - "leerbox"
+    - "empty box"
+    - "plüsch"
+    - "plush"
+    - "t-shirt"
+    - "hoodie"
+    - "tasse"
+    - "lego"
+    - "proxy"
+  # Only used for html shops without structured data.
+  status_patterns:
+    preorder:
+      - "jetzt vorbestellen"
+      - "vorbestellen"
+      - "pre-order now"
+    in_stock:
+      - "in den warenkorb"
+      - "sofort lieferbar"
+      - "sofort verfügbar"
+      - "auf lager"
+      - "jetzt kaufen"
+      - "add to cart"
+    unavailable:
+      - "ausverkauft"
+      - "nicht verfügbar"
+      - "nicht lieferbar"
+      - "nicht auf lager"
+      - "momentan nicht"
+      - "benachrichtigen"
+      - "demnächst"
+      - "sold out"
+      - "out of stock"
+
+shops:
+  # --- Shopify -----------------------------------------------------------
+  - name: cardcosmos
+    platform: shopify
+    url: "https://cardcosmos.de"
+    collections: [pokemon-30th-celebration-vorbestellen, pre-order-the-pokemon-30th-celebration]
+  - name: Yonko TCG
+    platform: shopify
+    url: "https://yonko-tcg.de"
+    collections: [30th-celebration-30-jahre]
+  - name: 2Sleeve
+    platform: shopify
+    url: "https://www.2sleeve.de"
+  - name: Chief Cards
+    platform: shopify
+    url: "https://chiefcards.de"
+  - name: Pokitrio
+    platform: shopify
+    url: "https://www.pokitrio.de"
+    assume_pokemon: true
+  - name: Rot der Sammler
+    platform: shopify
+    url: "https://www.rotdersammler.de"
+  - name: Mythracards
+    platform: shopify
+    url: "https://mythracards.com"
+  - name: PushDich TCG
+    platform: shopify
+    url: "https://www.pushdich-tcg.de"
+  - name: Toy Treasure
+    platform: shopify
+    url: "https://toy-treasure.com"
+  - name: KARDS Greifswald
+    platform: shopify
+    url: "https://kardsgreifswald.de"
+  - name: Play-Cards
+    platform: shopify
+    url: "https://play-cards.de"
+  - name: TCGViert
+    platform: shopify
+    url: "https://tcgviert.com"
+
+  # --- WooCommerce -------------------------------------------------------
+  - name: Zambomba
+    platform: woocommerce
+    url: "https://www.zambomba.de"
+  - name: Shinyhit
+    platform: woocommerce
+    url: "https://shinyhit.com"
+
+  # --- HTML (JTL, Shopware and others) -----------------------------------
+  - name: Card-Corner
+    platform: html
+    url: "https://www.card-corner.de"
+    pages: ["https://www.card-corner.de/pokemon-30th-celebration-japanisch"]
+    search_url: "https://www.card-corner.de/?qs={q}"
+  - name: Gate to the Games
+    platform: html
+    url: "https://www.gate-to-the-games.de"
+    search_url: "https://www.gate-to-the-games.de/?qs={q}"
+  - name: LottiCards
+    platform: html
+    url: "https://www.lotticards.de"
+    search_url: "https://www.lotticards.de/?qs={q}"
+  - name: Pokegeodude
+    platform: html
+    url: "https://pokegeodude.shop"
+    search_url: "https://pokegeodude.shop/?qs={q}"
+    assume_pokemon: true
+  - name: TRADER
+    platform: html
+    url: "https://trader-online.de"
+    search_url: "https://trader-online.de/search?search={q}"
+  - name: JK-Entertainment
+    platform: html
+    url: "https://jk-entertainment.de"
+    search_url: "https://jk-entertainment.de/search?search={q}"
+  - name: Comicplanet
+    platform: html
+    url: "https://www.comicplanet.de"
+    search_url: "https://www.comicplanet.de/search?sSearch={q}"
+
+  # --- General retail (single product pages, stricter bot checks) ---------
+  - name: Netto
+    platform: html
+    url: "https://www.netto-online.de"
+    pages: ["https://www.netto-online.de/pok-mon-tcg-30th-celebration-m6a-booster-display-japanische-edition-/p-3193575000"]
+    language: JP
+    assume_pokemon: true
+    interval: 30
+  - name: Smyths Toys
+    platform: html
+    url: "https://www.smythstoys.com"
+    pages: ["https://www.smythstoys.com/de/de-de/spielzeug/action-spielzeug/pokemon/pokemon-karten/pokemon-karten-top-trainer-box-30-jahre-edition/p/264148"]
+    language: DE
+    assume_pokemon: true
+    interval: 30

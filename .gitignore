@@ -6,3 +6,6 @@ data/state.json
 data/latest_results.json
 data/*.log
 !data/.gitkeep
+data/live_state.json
+data/live_results.json
+data/*.tmp

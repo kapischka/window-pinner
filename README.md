@@ -15,6 +15,49 @@ Scheduler, or the web dashboard's built-in auto-check, which keeps checking
 on a timer for as long as you leave that dashboard process running. Either
 way, it only detects and alerts — it never places an order for you.
 
+## Live-Monitor: 30 Jahre / 30th Celebration im Sekundentakt
+
+Zusätzlich zum Preorder Bot gibt es einen schnellen Live Modus. Er fragt
+deutsche Shops alle paar Sekunden ab und meldet sofort, wo ein Produkt der
+30 Jahre Serie (deutsche Ausgabe) oder der 30th CELEBRATION (japanische
+Ausgabe) gerade bestellbar ist. Englische Ware, Einzelkarten und gegradete
+Karten werden herausgefiltert. Erkannt wird über den Produkttitel, neue
+Produkte tauchen also ohne Konfigurationsänderung auf.
+
+```bash
+pip install -r requirements.txt
+python -m pokemon_preorder_bot.live --once   # einmal alle Shops prüfen, Tabelle ausgeben
+python -m pokemon_preorder_bot.live          # dauerhaft laufen lassen (Strg+C beendet)
+python -m pokemon_preorder_bot.live --open   # neue Treffer direkt im Browser öffnen
+python -m pokemon_preorder_bot.live --interval 5 --languages JP
+```
+
+Kein Browser nötig: Shopify Shops werden über ihre JSON Suche abgefragt,
+WooCommerce Shops über die öffentliche Store API, alle anderen über das
+HTML der Such oder Produktseite. Jeder Shop läuft in einem eigenen Thread
+(Standard alle 10 s, Minimum 3 s, mit leichtem Zufallsversatz). Antwortet
+ein Shop mit 403, 429 oder 503, wartet der Monitor dort automatisch länger
+(bis 5 min) und hält sich an `Retry-After`.
+
+Sobald ein Produkt von nicht verfügbar auf verfügbar springt, kommt eine
+Desktop Benachrichtigung mit Piepton, dazu optional Discord
+(`DISCORD_WEBHOOK_URL`) und Telegram (`TELEGRAM_BOT_TOKEN` plus
+`TELEGRAM_CHAT_ID`). Der Zustand liegt in `data/live_state.json`, ein
+Neustart meldet bereits bekannte Treffer also nicht erneut. Die Ausgabe von
+`--once` zählt ebenfalls als bekannt.
+
+Live Ansicht im Browser: parallel `python -m webapp.app` starten und
+<http://127.0.0.1:5000/live> öffnen. Die Seite aktualisiert sich alle 2 s,
+filtert nach DE oder JP und zeigt, welche Shops erreichbar sind.
+
+Shops stehen in [`config/live_shops.yaml`](config/live_shops.yaml) (aktuell
+23, überwiegend TCG Fachhändler plus Netto und Smyths). Alle URLs stammen
+aus Webrecherche, live getestet wurde nur gegen einen lokalen Testserver,
+weil die Shops aus der Entwicklungsumgebung nicht erreichbar waren. Darum
+nach dem ersten Start `--once` laufen lassen: `error` heißt meist falsche
+Plattform oder URL, `blocked` heißt Rate Limit oder Botschutz, dann für
+diesen Shop `interval` erhöhen.
+
 ## What's covered out of the box
 
 Preloaded in [`config/targets.yaml`](config/targets.yaml), focused on
@@ -346,6 +389,7 @@ unavailable.
 
 ```
 config/targets.yaml           # sites to watch — edit this to add/remove targets
+config/live_shops.yaml        # shops for the live monitor
 pokemon_preorder_bot/
   config.py                   # loads/saves targets.yaml
   fetcher.py                  # static (requests) + JS-rendered (playwright) page fetching
@@ -353,6 +397,9 @@ pokemon_preorder_bot/
   state.py                    # remembers last status per (target, keyword) to dedupe alerts
   notifier.py                 # desktop + Discord notification + logging
   main.py                     # CLI entry point
+  live.py                     # live monitor (seconds-level, see top of README)
+  sources.py                  # Shopify / WooCommerce / HTML fetchers for live.py
+  catalog.py                  # 30th-anniversary + language detection from titles
 webapp/                       # local Flask dashboard (see "Web dashboard" above)
 data/                         # state.json, latest_results.json, bot.log (gitignored)
 tests/                        # matcher unit tests

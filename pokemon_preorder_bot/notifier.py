@@ -30,6 +30,24 @@ def _notify_discord(title: str, message: str) -> None:
         logger.warning("Discord notification failed (%s); alert was still logged above", exc)
 
 
+def _notify_telegram(title: str, message: str) -> None:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+    try:
+        import requests
+
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": f"{title}\n{message}", "disable_web_page_preview": True},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 - Telegram delivery is best-effort, never fatal
+        logger.warning("Telegram notification failed (%s); alert was still logged above", exc)
+
+
 def notify(title: str, message: str) -> None:
     logger.info("ALERT: %s - %s", title, message)
     try:
@@ -39,3 +57,4 @@ def notify(title: str, message: str) -> None:
     except Exception as exc:  # noqa: BLE001 - desktop notifications are best-effort
         logger.warning("desktop notification failed (%s); alert was still logged above", exc)
     _notify_discord(title, message)
+    _notify_telegram(title, message)
