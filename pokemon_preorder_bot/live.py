@@ -15,13 +15,14 @@ import os
 import random
 import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from . import catalog, ui
+from . import catalog, pricing, ui
 from .main import ROOT
 from .notifier import notify, setup_logging
 from .sources import Listing, PollError, Shop, StatusPatterns, new_session, poll_shop
@@ -43,7 +44,8 @@ MAX_ITEMS_PER_ALERT = 5
 # never alert again when it returns; one miss alone is often just ranking
 # noise in a capped result list.
 MISSES_UNTIL_GONE = 3
-PLATFORMS = {"shopify", "woocommerce", "html", "auto"}
+PLATFORMS = {"shopify", "woocommerce", "html", "ebay", "auto"}
+MARKUP_CHOICES = (10, 25, 50, 100, None)  # offered in the window, None = no limit
 
 
 def _now() -> str:
@@ -64,11 +66,22 @@ class Settings:
             in_stock=patterns.get("in_stock", []),
             unavailable=patterns.get("unavailable", []),
         )
+        self.max_markup: float | None = None
+        self.min_markup = -50.0
+        self.references: list[pricing.Reference] = []
+
+    def load_prices(self, raw: dict) -> None:
+        limit = raw.get("max_markup_percent", 50)
+        self.max_markup = None if limit is None else float(limit)
+        # Far below UVP is a single promo card, an empty box or a fake, not a deal.
+        self.min_markup = float(raw.get("min_markup_percent", -50))
+        self.references = pricing.load_references(raw.get("products", []))
 
 
 def load_config(path: str | Path) -> tuple[Settings, list[Shop]]:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     settings = Settings(raw.get("settings", {}))
+    settings.load_prices(raw.get("prices", {}))
     shops = []
     for entry in raw.get("shops", []):
         entry = dict(entry)
@@ -82,6 +95,8 @@ def load_config(path: str | Path) -> tuple[Settings, list[Shop]]:
             raise ValueError(f"Shop {shop.name!r}: platform muss eins von {sorted(PLATFORMS)} sein")
         if shop.platform == "html" and not (shop.pages or shop.search_url):
             raise ValueError(f"Shop {shop.name!r}: html braucht pages oder search_url")
+        if shop.platform == "ebay" and not shop.queries:
+            raise ValueError(f"Shop {shop.name!r}: ebay braucht queries")
         if any(s.name == shop.name for s in shops):
             raise ValueError(f"Shop-Name {shop.name!r} ist doppelt")
         shops.append(shop)
@@ -104,6 +119,9 @@ class LiveMonitor:
         self.persist_state = persist_state
         self.lock = threading.Lock()
         self.stop = threading.Event()
+        self.paused = threading.Event()
+        self.settings_path = state_path.with_name("live_settings.json")
+        self._load_overrides()
         self.products: dict[str, dict] = self._load_state()
         self.shop_status: dict[str, dict] = {
             s.name: {"status": "pending", "detail": "", "last_check": None, "url": s.url} for s in self.shops
@@ -115,7 +133,7 @@ class LiveMonitor:
         """The listing's language if it's a product we watch, else None."""
         if not catalog.is_30th(listing.title, listing.context, shop.assume_pokemon):
             return None
-        if catalog.is_excluded(listing.title, self.settings.exclude):
+        if catalog.is_excluded(listing.title, self.settings.exclude + shop.exclude):
             return None
         lang = catalog.language(listing.title, default=shop.language)
         if lang in self.settings.languages:
@@ -131,9 +149,71 @@ class LiveMonitor:
 
     def _load_state(self) -> dict[str, dict]:
         try:
-            return json.loads(self.state_path.read_text(encoding="utf-8"))
+            products = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
+        for record in products.values():
+            # State written by older versions: price as text, no stock/markup fields.
+            if isinstance(record.get("price"), str):
+                record["price"] = pricing.parse_price(record["price"])
+            record.setdefault("in_stock", record.get("available", False))
+            self._evaluate(record)
+        return products
+
+    def _load_overrides(self) -> None:
+        """Settings changed in the window survive a restart."""
+        try:
+            overrides = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if "max_markup" in overrides:
+            self.settings.max_markup = overrides["max_markup"]
+
+    # --- prices -----------------------------------------------------------
+
+    def _evaluate(self, record: dict) -> None:
+        """Derives "available" (shown and alerted) from the raw stock state
+        and the current markup limit."""
+        limit = self.settings.max_markup
+        markup = record.get("markup")
+        record["too_expensive"] = bool(limit is not None and markup is not None and markup > limit)
+        record["available"] = bool(record.get("in_stock")) and not record["too_expensive"]
+
+    def set_max_markup(self, value: float | None) -> None:
+        """Changes the limit from the window and re-sorts every known
+        listing at once. No alerts: the user just looked."""
+        now = _now()
+        with self.lock:
+            self.settings.max_markup = value
+            for record in self.products.values():
+                before = record.get("available")
+                self._evaluate(record)
+                if record["available"] != before:
+                    record["since"] = now
+            self._write_json(self.settings_path, {"max_markup": value})
+            self._save()
+        logger.info("Max. Aufpreis: %s", "egal" if value is None else f"{value:g} %")
+
+    def toggle_pause(self) -> bool:
+        if self.paused.is_set():
+            self.paused.clear()
+        else:
+            self.paused.set()
+        logger.info("Pausiert" if self.paused.is_set() else "Läuft weiter")
+        return self.paused.is_set()
+
+    def _cheapest_per_product(self, candidates: list) -> list:
+        """Marketplaces list the same box dozens of times; keep the cheapest
+        orderable offer per known product."""
+        best: dict[str, tuple] = {}
+        for candidate in candidates:
+            listing, _, ref = candidate
+            if not listing.available or listing.price is None or ref is None:
+                continue
+            current = best.get(ref.name)
+            if current is None or listing.price < current[0].price:
+                best[ref.name] = candidate
+        return list(best.values())
 
     def _write_json(self, path: Path, data) -> None:
         try:
@@ -154,6 +234,9 @@ class LiveMonitor:
         )
         return {
             "updated": _now(),
+            "paused": self.paused.is_set(),
+            "max_markup": self.settings.max_markup,
+            "markup_choices": list(MARKUP_CHOICES),
             "interval_seconds": self.settings.interval,
             "languages": sorted(self.settings.languages),
             "shops": {name: dict(status) for name, status in self.shop_status.items()},
@@ -194,52 +277,80 @@ class LiveMonitor:
         now = _now()
         fresh: list[dict] = []
         with self.lock:
-            seen: set[str] = set()
+            candidates = []
             for listing in listings:
                 lang = self.wanted(shop, listing)
                 if lang is None:
                     continue
+                ref = pricing.find_reference(listing.title, lang, self.settings.references)
+                if ref is None and shop.require_reference:
+                    continue
+                markup = pricing.markup_percent(listing.price, ref)
+                if markup is not None and markup < self.settings.min_markup:
+                    continue
+                candidates.append((listing, lang, ref))
+            if shop.best_per_product:
+                candidates = self._cheapest_per_product(candidates)
+
+            seen: set[str] = set()
+            for listing, lang, ref in candidates:
                 seen.add(listing.url)
                 prev = self.products.get(listing.url, {})
                 was_available = prev.get("available", False)
                 preorder = listing.preorder or catalog.looks_preorder(listing.title)
                 if listing.available is None:
-                    available = was_available
+                    in_stock = prev.get("in_stock", False)
                 else:
-                    # "available" means: can be bought and shipped now.
-                    available = listing.available and (self.settings.include_preorders or not preorder)
+                    # In stock means: can be bought and shipped now.
+                    in_stock = listing.available and (self.settings.include_preorders or not preorder)
+                price = listing.price if listing.price is not None else prev.get("price")
                 record = {
                     "shop": shop.name,
                     "title": listing.title,
                     "url": listing.url,
-                    "price": listing.price or prev.get("price", ""),
+                    "price": price,
                     "language": lang,
-                    "available": available,
+                    "in_stock": in_stock,
                     "preorder": preorder,
-                    "since": prev.get("since", now) if available == was_available and prev else now,
+                    "reference": {"name": ref.name, "kind": ref.kind, "price": ref.price} if ref else None,
+                    "markup": pricing.markup_percent(price, ref),
                     "last_seen": now,
                     "misses": 0,
                 }
+                self._evaluate(record)
+                available = record["available"]
+                record["since"] = prev.get("since", now) if prev and available == was_available else now
                 self.products[listing.url] = record
                 if available and not was_available:
                     fresh.append(record)
                 elif was_available and not available:
-                    logger.info("🔴 weg: [%s] %s bei %s", lang, listing.title, shop.name)
+                    reason = "zu teuer" if record["too_expensive"] else "weg"
+                    logger.info("🔴 %s: [%s] %s bei %s", reason, lang, listing.title, shop.name)
             for url, record in self.products.items():
-                if not complete or record["shop"] != shop.name or url in seen or not record["available"]:
+                if not complete or record["shop"] != shop.name or url in seen or not record.get("in_stock"):
                     continue
                 record["misses"] = record.get("misses", 0) + 1
                 if record["misses"] >= MISSES_UNTIL_GONE:
-                    record.update(available=False, since=now)
+                    record["in_stock"] = False
+                    self._evaluate(record)
+                    record["since"] = now
                     logger.info("🔴 weg (nicht mehr gelistet): [%s] %s bei %s", record["language"], record["title"], shop.name)
             self.shop_status[shop.name].update(status="ok", detail=f"{len(seen)} Treffer", last_check=now)
             self._save()
         return fresh
 
+    @staticmethod
+    def describe_price(record: dict) -> str:
+        """'54,99 € (+0 % UVP)' or just the price when no reference is known."""
+        text = pricing.format_euro(record.get("price"))
+        if record.get("markup") is not None and record.get("reference"):
+            text += f" ({record['markup']:+.0f} % {record['reference']['kind']})"
+        return text
+
     def alert(self, shop: Shop, fresh: list[dict]) -> None:
         for p in fresh:
-            logger.info("🟢 VERFÜGBAR: [%s] %s %s bei %s → %s", p["language"], p["title"], p["price"], shop.name, p["url"])
-        lines = [f"[{p['language']}] {p['title']} {p['price']}".strip() + f"\n{p['url']}" for p in fresh[:MAX_ITEMS_PER_ALERT]]
+            logger.info("🟢 VERFÜGBAR: [%s] %s %s bei %s → %s", p["language"], p["title"], self.describe_price(p), shop.name, p["url"])
+        lines = [f"[{p['language']}] {p['title']} {self.describe_price(p)}".strip() + f"\n{p['url']}" for p in fresh[:MAX_ITEMS_PER_ALERT]]
         if len(fresh) > MAX_ITEMS_PER_ALERT:
             lines.append(f"… und {len(fresh) - MAX_ITEMS_PER_ALERT} weitere")
         title = f"🟢 {shop.name}: {fresh[0]['title']}" if len(fresh) == 1 else f"🟢 {shop.name}: {len(fresh)} Produkte verfügbar"
@@ -251,6 +362,9 @@ class LiveMonitor:
         interval = max(shop.interval or self.settings.interval, MIN_INTERVAL)
         delay = random.uniform(0, interval)  # stagger shops so they don't all fire at once
         while not self.stop.wait(delay):
+            if self.paused.is_set():
+                delay = 1
+                continue
             try:
                 fresh = self.check(shop, session)
                 if fresh:
@@ -271,7 +385,7 @@ class LiveMonitor:
     def run_forever(self, port: int | None = None, open_window: bool = True) -> None:
         if port is not None:
             try:
-                url = ui.serve(self.snapshot, port)
+                url = ui.serve(self.snapshot, port, actions={"pause": self._action_pause, "settings": self._action_settings})
             except OSError as exc:
                 logger.warning("Fenster nicht verfügbar: %s", exc)
             else:
@@ -294,6 +408,17 @@ class LiveMonitor:
             logger.info("Beende …")
             self.stop.set()
 
+    def _action_pause(self, _payload: dict) -> dict:
+        return {"paused": self.toggle_pause()}
+
+    def _action_settings(self, payload: dict) -> dict:
+        if "max_markup" in payload:
+            value = payload["max_markup"]
+            if value is not None and not isinstance(value, (int, float)):
+                raise ValueError("max_markup muss eine Zahl oder null sein")
+            self.set_max_markup(None if value is None else float(value))
+        return {"max_markup": self.settings.max_markup}
+
     def run_once(self) -> None:
         def one(shop: Shop) -> None:
             try:
@@ -314,7 +439,24 @@ class LiveMonitor:
         if not available:
             print("Gerade nichts verfügbar.")
         for p in sorted(available, key=lambda p: (p["language"], p["title"])):
-            print(f"🟢 [{p['language']}] {p['title']}  {p['price']}  ({p['shop']})\n   {p['url']}")
+            print(f"🟢 [{p['language']}] {p['title']}  {self.describe_price(p)}  ({p['shop']})\n   {p['url']}")
+        expensive = sum(1 for p in self.products.values() if p.get("too_expensive") and p["shop"] in self.shop_status)
+        if expensive:
+            print(f"\n{expensive} weitere lieferbar, aber mehr als {self.settings.max_markup:g} % über UVP.")
+
+
+def running_instance(port: int) -> str | None:
+    """URL of a radar already running on this port, so a second double
+    click opens its window instead of polling every shop twice."""
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url + "api/state", timeout=1) as resp:
+            if "markup_choices" in json.load(resp):
+                return url
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -334,6 +476,12 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    if not args.once and not args.no_ui:
+        url = running_instance(args.port)
+        if url:
+            print(f"Das Radar läuft schon, öffne das Fenster: {url}")
+            ui.open_window(url)
+            return
     Path(args.log).parent.mkdir(parents=True, exist_ok=True)
     setup_logging(args.log)
     settings, shops = load_config(args.config)

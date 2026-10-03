@@ -17,62 +17,87 @@ way, it only detects and alerts — it never places an order for you.
 
 ## Live-Monitor: 30 Jahre / 30th Celebration im Sekundentakt
 
-Zusätzlich zum Preorder Bot gibt es einen schnellen Live Modus. Er fragt
-etablierte deutsche Shops alle paar Sekunden ab und zeigt, wo ein Produkt
-der 30 Jahre Serie (deutsche Ausgabe) oder der 30th CELEBRATION
-(japanische Ausgabe) gerade sofort lieferbar ist. Vorbestellungen,
-englische, koreanische, chinesische und andere Ausgaben sowie Einzelkarten
-und gegradete Karten werden herausgefiltert. Erkannt wird über den
-Produkttitel, neue Produkte tauchen also ohne Konfigurationsänderung auf.
+**Starten: Doppelklick auf `Start Radar.command`** (Mac) oder `Start Radar.bat`
+(Windows). Beim ersten Mal richtet der Starter alles ein (Python Umgebung,
+Pakete, ein unsichtbarer Chrome für die großen Händler; dauert ein paar
+Minuten), danach startet er sofort und holt vorher die neueste Version.
+Das Terminal Fenster offen lassen, solange das Radar laufen soll. Ein
+zweiter Doppelklick öffnet nur das Fenster des laufenden Radars. Einzige
+Voraussetzung ist Python 3.9 oder neuer.
+
+Das Radar fragt Shops alle paar Sekunden ab und zeigt, wo ein Produkt der
+30 Jahre Serie (deutsche Ausgabe) oder der 30th CELEBRATION (japanische
+Ausgabe) gerade sofort lieferbar ist, mit dem Aufpreis gegenüber der UVP.
+Vorbestellungen, andere Sprachausgaben, Einzelkarten und gegradete Karten
+werden herausgefiltert. Erkannt wird über den Produkttitel, neue Produkte
+tauchen also ohne Konfigurationsänderung auf.
+
+**Das Fenster** („30 Jahre Radar“, <http://127.0.0.1:8765>) öffnet sich
+einmal als eigenes App Fenster ohne Tabs (Chrome, Edge oder Brave, sonst der
+Standardbrowser). Es zeigt alle lieferbaren Produkte mit Preis, Aufpreis
+über UVP und Shop, filtert nach Deutsch oder Japanisch, hebt neue Treffer
+drei Minuten lang hervor und zeigt, welche Shops erreichbar sind. Oben
+rechts pausierst und startest du das Radar, daneben stellst du den
+maximalen Aufpreis ein. Ein Klick auf „zu teuer, ausgeblendet“ zeigt die
+aussortierten Angebote ausgegraut an. Ein Shop öffnet sich nur, wenn du
+auf „Zum Shop“ klickst. Ton und Browser Mitteilungen lassen sich im Fenster
+einschalten.
+
+**Aufpreis über UVP.** Unter `prices` in
+[`config/live_shops.yaml`](config/live_shops.yaml) steht für jedes Produkt
+die UVP (z. B. Top-Trainer-Box 54,99 €, Booster Bundle 29,99 €,
+Poster-Kollektion 23,99 €). Japanische Produkte haben keine deutsche UVP,
+dort steht ein üblicher Importpreis als „Richtpreis“ (Display 160 €). Jedes
+Angebot, dessen Titel zu einem Produkt passt, bekommt seinen Aufpreis
+angezeigt. Liegt er über `max_markup_percent` (Standard 50 %, im Fenster
+änderbar), wird das Angebot ausgeblendet und löst keinen Alarm aus. Liegt
+der Preis mehr als 50 % unter der UVP, ist es meist eine einzelne Promo
+Karte, eine leere Box oder eine Fälschung; solche Angebote fallen ganz
+raus. Angebote ohne bekannte UVP erscheinen ohne Prozentangabe.
+
+**Shops.** Aktiv sind etablierte TCG Händler (cardcosmos, Card-Corner,
+TRADER, Gate to the Games, KEEPSEVEN, LottiCards, JK-Entertainment,
+Comicplanet), große Ketten (MediaMarkt, Saturn, Müller, Smyths, Thalia,
+Galeria, Spiele Max, Otto, Netto, Amazon, Kaufland) und eBay. Die Ketten
+bauen ihre Seiten mit JavaScript, deshalb liest sie ein unsichtbarer Chrome
+einmal pro Minute. Bei Marktplätzen (eBay, Amazon, Otto, Kaufland) zählen
+nur Produkte mit bekannter UVP und nur das günstigste Angebot je Produkt;
+bei eBay nur Sofort-Kaufen, neu, Artikelstandort Deutschland. 22 kleinere
+Shops stehen mit `enabled: false` in der Config und lassen sich einzeln
+einschalten.
+
+**Abfragen.** Shopify Shops werden über ihre JSON Suche abgefragt,
+WooCommerce Shops über die öffentliche Store API, andere über das HTML der
+Such oder Produktseite (bei `render: true` über den unsichtbaren Chrome).
+Jeder Shop läuft in einem eigenen Thread (Fachhändler alle 10 s, Minimum
+3 s, mit leichtem Zufallsversatz). Antwortet ein Shop mit 403, 429 oder
+503, wartet das Radar dort automatisch länger (bis 5 min).
+
+**Vorbestellungen** erkennt es an Wörtern wie „Vorbestellung“ oder
+„Pre-Order“ in Titel, Tags, Kategorie oder Lagertext, an der schema.org
+Angabe `PreOrder` und an einem Datum, das noch in der Zukunft liegt. Mit
+`include_preorders: true` werden sie wieder angezeigt.
+
+**Meldungen.** Sobald ein Produkt lieferbar und im Preisrahmen ist, kommt
+eine Desktop Benachrichtigung mit Ton und Aufpreis, optional auch über
+Discord (`DISCORD_WEBHOOK_URL`) und Telegram (`TELEGRAM_BOT_TOKEN` plus
+`TELEGRAM_CHAT_ID`). Bereits bekannte Treffer meldet ein Neustart nicht
+erneut. Verschwindet ein Produkt dreimal hintereinander aus den Ergebnissen
+eines Shops, gilt es als weg und löst beim Wiederauftauchen erneut Alarm
+aus.
+
+Für das Terminal gibt es weiterhin:
 
 ```bash
-pip install -r requirements.txt
 python -m pokemon_preorder_bot.live --once   # einmal alle Shops prüfen, Tabelle ausgeben
-python -m pokemon_preorder_bot.live          # dauerhaft laufen lassen, öffnet das Fenster (Strg+C beendet)
+python -m pokemon_preorder_bot.live --no-window --port 9000
 python -m pokemon_preorder_bot.live --interval 5 --languages JP
 ```
 
-**Das Fenster.** Beim Start öffnet sich einmal das „30 Jahre Radar“ unter
-<http://127.0.0.1:8765>, wenn möglich als eigenes App Fenster ohne Tabs
-(Chrome, Edge oder Brave, sonst der Standardbrowser). Es zeigt alle sofort
-lieferbaren Produkte mit Preis und Shop, filtert nach Deutsch oder
-Japanisch, hebt neue Treffer drei Minuten lang hervor und zeigt, welche
-Shops erreichbar sind. Ein Shop öffnet sich nur, wenn du auf „Zum Shop“
-klickst. Ton und Browser Mitteilungen lassen sich im Fenster einschalten.
-`--no-window` öffnet das Fenster nicht automatisch, `--no-ui` verzichtet
-ganz darauf, `--port` wählt einen anderen Port.
-
-**Abfragen.** Kein Browser nötig: Shopify Shops werden über ihre JSON Suche
-abgefragt, WooCommerce Shops über die öffentliche Store API, alle anderen
-über das HTML der Such oder Produktseite. Bei `platform: auto` erkennt der
-Monitor Shopify oder WooCommerce beim ersten Abruf selbst. Jeder Shop läuft
-in einem eigenen Thread (Standard alle 10 s, Minimum 3 s, mit leichtem
-Zufallsversatz). Antwortet ein Shop mit 403, 429 oder 503, wartet der
-Monitor dort automatisch länger (bis 5 min) und hält sich an `Retry-After`.
-
-**Vorbestellungen** erkennt er an Wörtern wie „Vorbestellung“ oder
-„Pre-Order“ in Titel, Tags, Kategorie oder Lagertext, an der schema.org
-Angabe `PreOrder` und an einem Datum, das noch in der Zukunft liegt („ab
-16.10.2026“). Mit `include_preorders: true` in der Config werden sie wieder
-angezeigt.
-
-**Meldungen.** Sobald ein Produkt sofort lieferbar wird, kommt eine Desktop
-Benachrichtigung mit Ton, dazu optional Discord (`DISCORD_WEBHOOK_URL`) und
-Telegram (`TELEGRAM_BOT_TOKEN` plus `TELEGRAM_CHAT_ID`). Der Zustand liegt
-in `data/live_state.json`, ein Neustart meldet bereits bekannte Treffer also
-nicht erneut. `--once` ändert diesen Zustand nicht. Verschwindet ein Produkt
-dreimal hintereinander aus den Ergebnissen eines Shops (viele Shops blenden
-Ausverkauftes aus), gilt es als weg und löst beim Wiederauftauchen erneut
-einen Alarm aus.
-
-**Shops** stehen in [`config/live_shops.yaml`](config/live_shops.yaml).
-Aktiv sind nur etablierte Händler: cardcosmos, Card-Corner, TRADER, Gate to
-the Games, KEEPSEVEN, LottiCards, JK-Entertainment, Comicplanet, Netto und
-Smyths. 22 kleinere Shops stehen mit `enabled: false` darin und lassen sich
-einzeln einschalten. Alle URLs stammen aus Webrecherche, live getestet wurde
-nur gegen einen lokalen Testserver. Darum nach dem ersten Start `--once`
-laufen lassen: `error` heißt meist falsche Plattform oder URL, `blocked`
-heißt Rate Limit oder Botschutz, dann für diesen Shop `interval` erhöhen.
+Alle Shop Adressen stammen aus Webrecherche, getestet wurde gegen lokale
+Testseiten. Zeigt ein Shop im Fenster dauerhaft „Fehler“, hat sich meist
+seine Suchadresse geändert; „blockiert“ heißt Botschutz oder Rate Limit,
+dann für diesen Shop `interval` erhöhen.
 
 ## What's covered out of the box
 
@@ -415,6 +440,8 @@ pokemon_preorder_bot/
   main.py                     # CLI entry point
   live.py                     # live monitor (seconds-level, see top of README)
   ui.py, ui.html              # the live monitor's window
+  pricing.py                  # price parsing and markup over UVP
+Start Radar.command / .bat    # double-click launchers
   sources.py                  # Shopify / WooCommerce / HTML fetchers for live.py
   catalog.py                  # 30th-anniversary + language detection from titles
 webapp/                       # local Flask dashboard (see "Web dashboard" above)

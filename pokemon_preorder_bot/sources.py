@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import html as html_lib
 import logging
+import queue
 import random
 import re
+import threading
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -20,8 +24,9 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
-from .fetcher import USER_AGENT
+from .fetcher import USER_AGENT, fetch_rendered, playwright_browser
 from .catalog import looks_preorder
+from .pricing import parse_price, price_in_text
 from .matcher import (
     STATUSES_ACTIONABLE,
     classify_status,
@@ -45,7 +50,7 @@ class Listing:
     title: str
     url: str
     available: bool | None  # orderable at all; None: listed, but no clear stock signal
-    price: str = ""
+    price: float | None = None
     context: str = ""  # vendor / product type, used to confirm "is Pokémon"
     preorder: bool = False  # orderable, but ships later
 
@@ -53,7 +58,7 @@ class Listing:
 @dataclass
 class Shop:
     name: str
-    platform: str  # shopify | woocommerce | html | auto
+    platform: str  # shopify | woocommerce | html | ebay | auto
     url: str
     queries: list[str] = field(default_factory=list)
     collections: list[str] = field(default_factory=list)  # shopify only
@@ -63,6 +68,10 @@ class Shop:
     assume_pokemon: bool = False  # every listing here is Pokémon TCG
     interval: float | None = None
     enabled: bool = True
+    render: bool = False  # html only: load pages in a real browser (JavaScript shops)
+    require_reference: bool = False  # skip listings without a known UVP (marketplaces)
+    best_per_product: bool = False  # keep only the cheapest listing per product (marketplaces)
+    exclude: list[str] = field(default_factory=list)  # extra title words to skip, on top of settings.exclude
 
 
 @dataclass
@@ -92,15 +101,6 @@ def canonical_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/") or "/", query, ""))
 
 
-def _format_euro(amount: float) -> str:
-    return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def _price_from_text(value) -> str:
-    try:
-        return _format_euro(float(str(value).replace(",", ".")))
-    except (TypeError, ValueError):
-        return ""
 
 
 # --- parsers ------------------------------------------------------------------
@@ -118,7 +118,7 @@ def parse_shopify_suggest(data: dict, base_url: str) -> list[Listing]:
             title=p.get("title", ""),
             url=canonical_url(urljoin(base_url, p.get("url", ""))),
             available=p.get("available"),
-            price=_price_from_text(p.get("price")),
+            price=parse_price(p.get("price") or p.get("price_min")),
             context=f"{p.get('vendor', '')} {p.get('type', '')}",
             preorder=looks_preorder(f"{p.get('title', '')} {p.get('type', '')} {_tags(p.get('tags'))}"),
         )
@@ -138,7 +138,7 @@ def parse_shopify_collection(data: dict, base_url: str) -> list[Listing]:
                 title=p["title"],
                 url=canonical_url(urljoin(base_url, f"/products/{p['handle']}")),
                 available=any(v.get("available") for v in variants) if variants else None,
-                price=_price_from_text(variants[0].get("price")) if variants else "",
+                price=parse_price(variants[0].get("price")) if variants else None,
                 context=f"{p.get('vendor', '')} {p.get('product_type', '')}",
                 preorder=looks_preorder(
                     " ".join(
@@ -157,10 +157,10 @@ def parse_woocommerce(data: list, base_url: str) -> list[Listing]:
         if not p.get("name") or not p.get("permalink"):
             continue
         prices = p.get("prices") or {}
-        price = ""
+        price = None
         if prices.get("price"):
             try:
-                price = _format_euro(int(prices["price"]) / 10 ** int(prices.get("currency_minor_unit", 2)))
+                price = int(prices["price"]) / 10 ** int(prices.get("currency_minor_unit", 2)) or None
             except (TypeError, ValueError):
                 pass
         categories = " ".join(c.get("name", "") for c in p.get("categories") or [])
@@ -222,7 +222,7 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
                 title=html_lib.unescape(str(block.get("name", ""))).strip(),
                 url=canonical_url(urljoin(page_url, url)),
                 available=available,
-                price=_price_from_text(offer.get("price") or offer.get("lowPrice")),
+                price=parse_price(offer.get("price") or offer.get("lowPrice")),
                 preorder=preorder,
             )
         )
@@ -237,7 +237,7 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
                 title=_itemprop_value(scope, "name"),
                 url=canonical_url(urljoin(page_url, url)),
                 available=available,
-                price=_price_from_text(_itemprop_value(scope, "price")),
+                price=parse_price(_itemprop_value(scope, "price")),
                 preorder=preorder,
             )
         )
@@ -257,6 +257,7 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
                 title=title,
                 url=url,
                 available=None if status == "unknown" else status in STATUSES_ACTIONABLE,
+                price=price_in_text(card_text),
                 preorder=status == "preorder" or looks_preorder(card_text),
             )
         )
@@ -264,7 +265,99 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
     return [listing for listing in found.values() if accept(listing.title)]
 
 
+_EBAY_ITEM = re.compile(r"/itm/(?:[^/?#]+/)?(\d{9,})")
+_EBAY_NOISE = re.compile(r"^(neues angebot|new listing)\s*|wird in neuem fenster oder tab geöffnet|opens in a new window or tab", re.IGNORECASE)
+
+
+def parse_ebay(html: str) -> list[Listing]:
+    """Buy-it-now listings from an eBay search page. Works on both the
+    classic (s-item) and the 2025 (s-card) result markup by anchoring on the
+    item links and reading title and price from the surrounding card."""
+    soup = BeautifulSoup(html, "lxml")
+    listings: dict[str, Listing] = {}
+    for link in soup.find_all("a", href=_EBAY_ITEM):
+        item_id = _EBAY_ITEM.search(link["href"]).group(1)
+        if item_id in listings:
+            continue
+        card = link.find_parent("li") or link.parent
+        title_tag = card.find(class_=re.compile(r"(s-item|s-card)__title")) or link
+        title = _EBAY_NOISE.sub("", title_tag.get_text(" ", strip=True)).strip()
+        if not title or title.lower().startswith("shop on ebay"):
+            continue
+        price_tag = card.find(class_=re.compile(r"(s-item|s-card)__price"))
+        price_text = price_tag.get_text(" ", strip=True) if price_tag else card.get_text(" ", strip=True)
+        if " bis " in price_text or " to " in price_text:
+            continue  # variation listings show a range, the cheapest variant is rarely the product
+        listings[item_id] = Listing(
+            title=title,
+            url=f"https://www.ebay.de/itm/{item_id}",
+            available=True,
+            price=price_in_text(price_text),
+        )
+    return list(listings.values())
+
+
 # --- network ----------------------------------------------------------------
+
+
+class RenderWorker:
+    """One background thread owning one headless Chromium, shared by every
+    shop with `render: true`. Playwright's sync API may only be used from
+    the thread that started it, so shops hand URLs over a queue."""
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._broken: str | None = None
+
+    def render(self, url: str, timeout: float = 120) -> str:
+        if self._broken:
+            raise PollError(self._broken)
+        with self._lock:
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="browser", daemon=True)
+                self._thread.start()
+        future: Future = Future()
+        self._queue.put((url, future))
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeout as exc:
+            raise PollError(f"Browser brauchte zu lange für {url}") from exc
+        except PollError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - FetchError or a raw Playwright error
+            raise PollError(str(exc)) from exc
+
+    def _run(self) -> None:
+        try:
+            with playwright_browser() as browser:
+                while True:
+                    url, future = self._queue.get()
+                    try:
+                        future.set_result(fetch_rendered(url, browser=browser, wait_ms=2500, retries=0))
+                    except Exception as exc:  # noqa: BLE001 - handed to the waiting shop
+                        future.set_exception(exc)
+        except Exception as exc:  # noqa: BLE001 - Playwright or Chromium missing
+            reason = (str(exc).strip().splitlines() or [type(exc).__name__])[0]  # Playwright adds a big ASCII box
+            self._broken = f"Browser nicht verfügbar ({reason}). Einmal `python -m playwright install chromium` ausführen."
+            logger.error(self._broken)
+            # Keep answering, so a request queued while this thread was
+            # failing gets the reason instead of waiting for its timeout.
+            while True:
+                self._queue.get()[1].set_exception(PollError(self._broken))
+
+
+RENDERER = RenderWorker()
+
+EBAY_SEARCH = (
+    "https://www.ebay.de/sch/i.html?_nkw={q}"
+    "&LH_BIN=1"  # Sofort-Kaufen only, auctions have no final price
+    "&LH_ItemCondition=1000"  # new
+    "&LH_PrefLoc=1"  # located in Germany
+    "&_sop=15"  # cheapest first, shipping included
+    "&_ipg=60"
+)
 
 
 def new_session() -> requests.Session:
@@ -381,7 +474,7 @@ def poll_shop(
         failures = []
         for url in urls:
             try:
-                html = _get(session, url).text
+                html = RENDERER.render(url) if shop.render else _get(session, url).text
             except PollError as exc:
                 # One moved category page must not hide the others.
                 if exc.blocked:
@@ -396,6 +489,14 @@ def poll_shop(
             listings += parse_html(html, url, accept, patterns)
         if urls and len(failures) == len(urls):
             raise failures[0]
+    elif shop.platform == "ebay":
+        for query in shop.queries:
+            url = EBAY_SEARCH.replace("{q}", requests.utils.quote(query))
+            html = _get(session, url).text
+            blocked = find_blocked_phrase(html)
+            if blocked:
+                raise PollError(f'eBay Botschutz (matched "{blocked[0]}")', blocked=True)
+            listings += parse_ebay(html)
     else:
         raise PollError(f"unknown platform {shop.platform!r}")
 

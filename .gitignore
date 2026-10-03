@@ -9,3 +9,4 @@ data/*.log
 data/live_state.json
 data/live_results.json
 data/*.tmp
+data/live_settings.json

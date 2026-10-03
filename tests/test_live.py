@@ -1,11 +1,13 @@
+import contextlib
 import json
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from pokemon_preorder_bot import catalog, live, ui
+from pokemon_preorder_bot import catalog, live, pricing, sources, ui
 from pokemon_preorder_bot.live import LiveMonitor, Settings, load_config
 from pokemon_preorder_bot.sources import (
     Listing,
@@ -14,6 +16,7 @@ from pokemon_preorder_bot.sources import (
     StatusPatterns,
     canonical_url,
     detect_platform,
+    parse_ebay,
     parse_html,
     parse_shopify_collection,
     parse_shopify_suggest,
@@ -96,7 +99,7 @@ def test_parse_shopify_suggest():
     [listing] = parse_shopify_suggest(data, "https://shop.de")
     assert listing.url == "https://shop.de/products/poster-30-jahre"
     assert listing.available is True
-    assert listing.price == "39,99 €"
+    assert listing.price == 39.99
     assert "Pokémon" in listing.context
 
 
@@ -128,7 +131,7 @@ def test_parse_woocommerce():
     ]
     [listing] = parse_woocommerce(data, "https://www.zambomba.de")
     assert listing.title == "Pokemon 30 Jahre Tech-Sticker & Kollektion"
-    assert listing.price == "34,99 €"
+    assert listing.price == 34.99
     assert listing.available is True
 
 
@@ -140,7 +143,7 @@ def test_parse_html_jsonld_product_page():
     [listing] = parse_html(html, "https://www.netto-online.de/p-1?_pos=1&utm_source=x", accept, PATTERNS)
     assert listing.available is True
     assert listing.url == "https://www.netto-online.de/p-1"
-    assert listing.price == "199,99 €"
+    assert listing.price == 199.99
 
 
 def test_parse_html_microdata_listing():
@@ -241,7 +244,7 @@ def test_monitor_alerts_only_on_transition_and_filters(tmp_path, monkeypatch):
             Listing("Pokémon 30th Celebration ETB Englisch", "https://shop.de/products/en", True),
             Listing("Pokémon 30 Jahre Glurak PSA 10", "https://shop.de/products/psa", True),
         ],
-        [Listing(de, "https://shop.de/products/ttb", True, "54,99 €")],
+        [Listing(de, "https://shop.de/products/ttb", True, 54.99)],
         [Listing(de, "https://shop.de/products/ttb", None)],  # unclear signal keeps last state
         [Listing(de, "https://shop.de/products/ttb", False)],
     ]
@@ -251,7 +254,7 @@ def test_monitor_alerts_only_on_transition_and_filters(tmp_path, monkeypatch):
     assert set(monitor.products) == {"https://shop.de/products/ttb"}
 
     [fresh] = monitor.check(shop, None)
-    assert fresh["language"] == "DE" and fresh["price"] == "54,99 €"
+    assert fresh["language"] == "DE" and fresh["price"] == 54.99
 
     assert monitor.check(shop, None) == []
     assert monitor.products["https://shop.de/products/ttb"]["available"] is True
@@ -406,3 +409,163 @@ def test_shipped_config_hides_preorders_and_small_shops():
     on = {s.name for s in shops if s.enabled}
     assert {"cardcosmos", "Card-Corner", "TRADER"} <= on
     assert "Rot der Sammler" not in on
+
+
+# --- prices -------------------------------------------------------------------
+
+REFS = pricing.load_references(
+    [
+        {"name": "Top-Trainer-Box", "language": "DE", "uvp": 54.99, "match": r"top[\s-]*trainer"},
+        {"name": "Display", "language": "JP", "uvp": 160, "kind": "Richtpreis", "match": r"display"},
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Pokemon 30 Jahre TTB 69,99 € In den Warenkorb", 69.99),
+        ("UVP 54,99 € jetzt 64,99 €", 64.99),
+        ("statt 79,99€ nur 59,90€", 59.9),
+        ("EUR 1.299,00", 1299.0),
+        ("ohne Preis", None),
+    ],
+)
+def test_price_in_text(text, expected):
+    assert pricing.price_in_text(text) == expected
+
+
+def test_find_reference_respects_language():
+    assert pricing.find_reference("30 Jahre Top-Trainer-Box", "DE", REFS).name == "Top-Trainer-Box"
+    assert pricing.find_reference("30th Celebration Display", "JP", REFS).kind == "Richtpreis"
+    assert pricing.find_reference("30 Jahre Top-Trainer-Box", "JP", REFS) is None
+    assert pricing.markup_percent(82.49, REFS[0]) == 50.0
+
+
+def test_parse_ebay_both_layouts():
+    html = """
+    <ul>
+      <li class="s-item"><a class="s-item__link" href="https://www.ebay.de/itm/123456789012?hash=x">
+        <div class="s-item__title"><span>Neues Angebot</span> Pokémon 30 Jahre Top-Trainer-Box Deutsch OVP</div></a>
+        <span class="s-item__price">EUR 64,90</span></li>
+      <li class="s-card"><a href="https://www.ebay.de/itm/pokemon-display/223456789012">
+        <span class="s-card__title">Pokemon 30th Celebration Display M6a Japanisch</span></a>
+        <div class="s-card__price">179,00 €</div></li>
+      <li class="s-item"><a href="https://www.ebay.de/itm/323456789012"><div class="s-item__title">Shop on eBay</div></a></li>
+      <li class="s-item"><a href="https://www.ebay.de/itm/423456789012"><div class="s-item__title">30 Jahre Kollektion Auswahl</div></a>
+        <span class="s-item__price">EUR 20,00 bis EUR 90,00</span></li>
+    </ul>"""
+    listings = {l.url: (l.title, l.price) for l in parse_ebay(html)}
+    assert listings == {
+        "https://www.ebay.de/itm/123456789012": ("Pokémon 30 Jahre Top-Trainer-Box Deutsch OVP", 64.9),
+        "https://www.ebay.de/itm/223456789012": ("Pokemon 30th Celebration Display M6a Japanisch", 179.0),
+    }
+
+
+def _priced_monitor(tmp_path, monkeypatch, rounds, **shop_options):
+    settings = Settings({"languages": ["DE", "JP"]})
+    settings.load_prices({"max_markup_percent": 50, "min_markup_percent": -50})
+    settings.references = REFS
+    shop = Shop(name="Testshop", platform="shopify", url="https://shop.de", **shop_options)
+    monitor = LiveMonitor(settings, [shop], tmp_path / "state.json", tmp_path / "results.json")
+    feed = iter(rounds)
+    monkeypatch.setattr(live, "poll_shop", lambda *args: (next(feed), True))
+    return monitor, shop
+
+
+def test_markup_limit_hides_scalper_prices(tmp_path, monkeypatch):
+    fair = Listing("Pokémon 30 Jahre Top-Trainer-Box Deutsch", "https://shop.de/fair", True, 59.99)
+    scalper = Listing("Pokémon 30 Jahre Top-Trainer-Box DE OVP", "https://shop.de/scalper", True, 169.99)
+    unknown = Listing("Pokémon 30 Jahre Booster Deutsch", "https://shop.de/booster", True, 7.99)
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [[fair, scalper, unknown]])
+
+    fresh = {p["url"]: p for p in monitor.check(shop, None)}
+    assert set(fresh) == {"https://shop.de/fair", "https://shop.de/booster"}
+    assert fresh["https://shop.de/fair"]["markup"] == 9.1
+    assert fresh["https://shop.de/booster"]["markup"] is None  # no UVP known, shown without %
+    assert monitor.products["https://shop.de/scalper"]["too_expensive"] is True
+    assert "+9 % UVP" in monitor.describe_price(fresh["https://shop.de/fair"])
+
+    monitor.set_max_markup(None)
+    assert monitor.products["https://shop.de/scalper"]["available"] is True
+    monitor.set_max_markup(5)
+    assert monitor.products["https://shop.de/fair"]["available"] is False
+    # The choice survives a restart.
+    again = LiveMonitor(monitor.settings, [shop], tmp_path / "state.json", tmp_path / "results.json")
+    assert again.settings.max_markup == 5
+
+
+def test_implausibly_cheap_listings_are_dropped(tmp_path, monkeypatch):
+    promo = Listing("Pokémon 30 Jahre Top-Trainer-Box Nidorina Karte", "https://shop.de/promo", True, 3.5)
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [[promo]])
+    assert monitor.check(shop, None) == [] and monitor.products == {}
+
+
+def test_marketplace_keeps_cheapest_known_product(tmp_path, monkeypatch):
+    offers = [
+        Listing("Pokemon 30 Jahre Top-Trainer-Box Deutsch", "https://e.de/1", True, 79.0),
+        Listing("Pokemon 30 Jahre Top Trainer Box DE neu", "https://e.de/2", True, 61.5),
+        Listing("Pokemon 30 Jahre Sammelalbum", "https://e.de/3", True, 20.0),
+        Listing("Pokemon 30th Celebration Display JP", "https://e.de/4", True, 175.0),
+    ]
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [offers], require_reference=True, best_per_product=True)
+    assert sorted(p["url"] for p in monitor.check(shop, None)) == ["https://e.de/2", "https://e.de/4"]
+
+
+def test_pause_skips_polling(tmp_path, monkeypatch):
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [])
+    assert monitor.toggle_pause() is True and monitor.snapshot()["paused"] is True
+    assert monitor.toggle_pause() is False
+
+
+def test_window_actions(tmp_path, monkeypatch):
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [])
+    url = ui.serve(monitor.snapshot, 18900, actions={"pause": monitor._action_pause, "settings": monitor._action_settings})
+
+    def post(path, body, content_type="application/json"):
+        request = urllib.request.Request(url + path, data=json.dumps(body).encode(), headers={"Content-Type": content_type})
+        with urllib.request.urlopen(request, timeout=5) as resp:
+            return json.load(resp)
+
+    assert post("api/settings", {"max_markup": 25}) == {"max_markup": 25.0}
+    assert post("api/pause", {}) == {"paused": True}
+    with pytest.raises(urllib.error.HTTPError) as err:
+        post("api/settings", {"max_markup": "viel"})
+    assert err.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as err:  # a cross-site form post
+        post("api/pause", {}, content_type="application/x-www-form-urlencoded")
+    assert err.value.code == 404
+
+
+def test_render_worker_reports_missing_browser(monkeypatch):
+    @contextlib.contextmanager
+    def no_browser():
+        raise RuntimeError("Executable doesn't exist")
+        yield
+
+    monkeypatch.setattr(sources, "playwright_browser", no_browser)
+    worker = sources.RenderWorker()
+    with pytest.raises(PollError, match="playwright install chromium"):
+        worker.render("https://x.de", timeout=5)
+    with pytest.raises(PollError, match="playwright install chromium"):
+        worker.render("https://x.de", timeout=5)
+
+
+def test_second_start_finds_running_radar(tmp_path, monkeypatch):
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [])
+    url = ui.serve(monitor.snapshot, 18920)
+    port = int(url.rsplit(":", 1)[1].strip("/"))
+    assert live.running_instance(port) == url
+    assert live.running_instance(port + 50) is None
+
+
+def test_shipped_config_watches_retail_and_ebay_with_prices():
+    settings, shops = load_config(ROOT / "config" / "live_shops.yaml")
+    on = {s.name: s for s in shops if s.enabled}
+    assert {"MediaMarkt", "Müller", "Saturn", "Amazon", "eBay"} <= set(on)
+    assert on["MediaMarkt"].render and on["eBay"].best_per_product and on["eBay"].require_reference
+    assert settings.max_markup == 50 and settings.min_markup == -50
+    ttb = pricing.find_reference("Pokémon 30 Jahre Top-Trainer-Box Deutsch", "DE", settings.references)
+    assert (ttb.name, ttb.price) == ("Top-Trainer-Box", 54.99)
+    display = pricing.find_reference("30th Celebration Display M6a", "JP", settings.references)
+    assert display.kind == "Richtpreis"

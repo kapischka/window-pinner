@@ -76,9 +76,9 @@
     padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 600;
     background: var(--ok-soft); color: var(--ok);
   }
-  .pill.offline { background: var(--warn-soft); color: var(--warn); }
+  .pill.offline, .pill.paused { background: var(--warn-soft); color: var(--warn); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .pill:not(.offline) .dot { animation: pulse 1.6s ease-out infinite; }
+  .pill:not(.offline):not(.paused) .dot { animation: pulse 1.6s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 100% { box-shadow: 0 0 0 7px transparent; } }
 
   .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
@@ -96,6 +96,17 @@
   }
   .btn:hover { border-color: var(--muted); }
   .btn[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
+  .btn-main { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .btn-main:hover { border-color: var(--accent); filter: brightness(1.08); }
+  .btn-main.paused { background: var(--ok); border-color: var(--ok); }
+  .select { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .select select {
+    font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 9px; padding: 7px 10px;
+  }
+  button.stat { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  button.stat:hover { border-color: var(--muted); }
+  button.stat[aria-pressed="true"] { border-color: var(--bad); }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
   .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
@@ -117,6 +128,13 @@
   .lang-x { background: var(--unknown); }
   .tag-new { color: var(--ok); font-weight: 700; }
   .card-title { font-weight: 600; overflow-wrap: anywhere; }
+  .card.expensive { opacity: 0.6; }
+  .card.expensive .go { background: var(--muted); }
+  .markup-row { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .markup { font-weight: 700; border-radius: 6px; padding: 2px 7px; }
+  .markup-good { background: var(--ok-soft); color: var(--ok); }
+  .markup-ok { background: var(--warn-soft); color: var(--warn); }
+  .markup-high { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
   .card-bottom { display: flex; align-items: center; gap: 10px; margin-top: auto; }
   .price { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .shop-name { color: var(--muted); font-size: 13px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -156,6 +174,7 @@
       <div class="sub">Pokémon 30 Jahre und 30th Celebration, nur sofort lieferbar</div>
     </div>
     <span class="pill offline" id="pill"><span class="dot"></span><span id="pill-text">Verbinde …</span></span>
+    <button class="btn btn-main" id="pause">⏸ Pausieren</button>
   </header>
 
   <div class="toolbar">
@@ -164,6 +183,9 @@
       <button data-lang="DE" aria-pressed="false">Deutsch</button>
       <button data-lang="JP" aria-pressed="false">Japanisch</button>
     </div>
+    <label class="select">Max. Aufpreis
+      <select id="markup" aria-label="Maximaler Aufpreis über UVP"></select>
+    </label>
     <div class="spacer"></div>
     <button class="btn" id="sound" aria-pressed="false">🔈 Ton aus</button>
     <button class="btn" id="notify" aria-pressed="false">🔕 Mitteilungen aus</button>
@@ -171,8 +193,9 @@
 
   <div class="stats">
     <div class="stat"><b id="stat-available">–</b><span>sofort lieferbar</span></div>
+    <button class="stat" id="stat-expensive-btn" aria-pressed="false" title="Klicken, um sie anzuzeigen">
+      <b id="stat-expensive">–</b><span id="stat-expensive-label">zu teuer, ausgeblendet</span></button>
     <div class="stat"><b id="stat-shops">–</b><span>Shops erreichbar</span></div>
-    <div class="stat"><b id="stat-interval">–</b><span>Abfrage pro Shop</span></div>
     <div class="stat"><b id="stat-updated">–</b><span>letzte Prüfung</span></div>
   </div>
 
@@ -198,6 +221,20 @@
   var known = null;            // urls available at the previous poll, null before the first poll
   var firstSeen = {};          // url -> timestamp this window first saw it available
   var lang = load("lang", "");
+  var showExpensive = false;
+  var euroFormat = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" });
+
+  function euro(value) {
+    return typeof value === "number" ? euroFormat.format(value) : "";
+  }
+
+  function post(action, body) {
+    return fetch("/api/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(poll);
+  }
   var soundOn = load("sound", "0") === "1";
   var audio = null;
 
@@ -247,7 +284,7 @@
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     var first = products[0];
     var body = products.length === 1
-      ? first.shop + " · " + (first.price || "")
+      ? first.shop + " · " + euro(first.price)
       : products.length + " Produkte, zuerst " + first.title;
     var n = new Notification(products.length === 1 ? first.title : "Neu lieferbar", { body: body, tag: first.url });
     n.onclick = function () { window.focus(); window.open(first.url, "_blank", "noopener"); n.close(); };
@@ -283,6 +320,17 @@
     }
   });
 
+  document.getElementById("pause").addEventListener("click", function () { post("pause"); });
+
+  document.getElementById("markup").addEventListener("change", function (e) {
+    post("settings", { max_markup: e.target.value === "" ? null : Number(e.target.value) });
+  });
+
+  document.getElementById("stat-expensive-btn").addEventListener("click", function () {
+    showExpensive = !showExpensive;
+    render(true);
+  });
+
   document.querySelectorAll(".seg button").forEach(function (b) {
     b.addEventListener("click", function () {
       lang = b.dataset.lang;
@@ -305,9 +353,20 @@
     c.append(top);
 
     c.append(el("div", "card-title", p.title));
+    if (p.too_expensive) c.classList.add("expensive");
+
+    if (p.reference && typeof p.markup === "number") {
+      var row = el("div", "markup-row");
+      var level = p.too_expensive ? "high" : p.markup <= 10 ? "good" : "ok";
+      var sign = p.markup > 0 ? "+" : p.markup < 0 ? "−" : "±";
+      var word = p.markup < 0 ? "unter " : "über ";
+      row.append(el("span", "markup markup-" + level, sign + Math.abs(Math.round(p.markup)) + " % " + word + p.reference.kind));
+      row.append(el("span", "", p.reference.kind + " " + euro(p.reference.price)));
+      c.append(row);
+    }
 
     var bottom = el("div", "card-bottom");
-    bottom.append(el("span", "price", p.price || ""));
+    bottom.append(el("span", "price", euro(p.price)));
     bottom.append(el("span", "shop-name", p.shop));
     var go = el("a", "go", "Zum Shop ↗");
     go.href = p.url;
@@ -328,11 +387,32 @@
     var names = shopNames();
     var ok = names.filter(function (n) { return state.shops[n].status === "ok"; }).length;
     var checks = names.map(function (n) { return state.shops[n].last_check; }).filter(Boolean).sort();
+    var expensive = state.products.filter(function (p) { return p.too_expensive && p.in_stock; }).length;
     document.getElementById("stat-available").textContent = state.products.filter(function (p) { return p.available; }).length;
+    document.getElementById("stat-expensive").textContent = expensive;
+    document.getElementById("stat-expensive-label").textContent = showExpensive ? "zu teuer, eingeblendet" : "zu teuer, ausgeblendet";
+    document.getElementById("stat-expensive-btn").setAttribute("aria-pressed", String(showExpensive));
     document.getElementById("stat-shops").textContent = ok + " / " + names.length;
-    document.getElementById("stat-interval").textContent = Math.round(state.interval_seconds) + " s";
     document.getElementById("stat-updated").textContent = checks.length ? ago(checks[checks.length - 1]) : "–";
-    document.getElementById("shops-summary").textContent = ok + " von " + names.length + " erreichbar";
+    document.getElementById("shops-summary").textContent =
+      ok + " von " + names.length + " erreichbar, Fachhändler alle " + Math.round(state.interval_seconds) + " s";
+
+    var pause = document.getElementById("pause");
+    pause.textContent = state.paused ? "▶ Start" : "⏸ Pausieren";
+    pause.classList.toggle("paused", state.paused);
+
+    var select = document.getElementById("markup");
+    if (document.activeElement !== select) {
+      var current = state.max_markup === null ? "" : String(state.max_markup);
+      var choices = state.markup_choices.map(function (c) { return c === null ? "" : String(c); });
+      if (choices.indexOf(current) < 0) choices.push(current);
+      select.replaceChildren.apply(select, choices.map(function (value) {
+        var option = el("option", "", value === "" ? "egal" : value + " %");
+        option.value = value;
+        option.selected = value === current;
+        return option;
+      }));
+    }
   }
 
   // Grid and shop list, only when something visible changed (or force), so
@@ -344,10 +424,15 @@
     if (!state) return;
     renderStats();
 
-    var shown = state.products.filter(function (p) { return p.available && (!lang || p.language === lang); });
-    shown.sort(function (a, b) { return (b.since || "").localeCompare(a.since || ""); });
+    var shown = state.products.filter(function (p) {
+      var visible = p.available || (showExpensive && p.too_expensive && p.in_stock);
+      return visible && (!lang || p.language === lang);
+    });
+    shown.sort(function (a, b) {
+      return (a.available === b.available ? 0 : a.available ? -1 : 1) || (b.since || "").localeCompare(a.since || "");
+    });
     var names = shopNames();
-    var signature = JSON.stringify([lang, shown, names.map(function (n) { return [n, state.shops[n].status]; })]);
+    var signature = JSON.stringify([lang, showExpensive, shown, names.map(function (n) { return [n, state.shops[n].status]; })]);
     if (!force && signature === drawn) return;
     drawn = signature;
 
@@ -362,14 +447,18 @@
       row.title = s.detail || s.status;
       row.append(el("span", "dot"));
       row.append(el("span", "shop-label", name));
-      row.append(el("span", "shop-detail", s.status === "ok" ? ago(s.last_check) : s.status === "pending" ? "startet" : "Fehler"));
+      row.append(el("span", "shop-detail", s.status === "ok" ? ago(s.last_check) : s.status === "pending" ? "startet" : s.status === "blocked" ? "blockiert" : "Fehler"));
       return row;
     }));
   }
 
   function setOnline(online) {
-    document.getElementById("pill").classList.toggle("offline", !online);
-    document.getElementById("pill-text").textContent = online ? "Live" : "Bot läuft nicht";
+    var paused = online && state && state.paused;
+    var pill = document.getElementById("pill");
+    pill.classList.toggle("offline", !online);
+    pill.classList.toggle("paused", Boolean(paused));
+    document.getElementById("pill-text").textContent = !online ? "Bot läuft nicht" : paused ? "Pausiert" : "Live";
+    document.getElementById("pause").hidden = !online;
   }
 
   function poll() {

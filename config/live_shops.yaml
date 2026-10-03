@@ -18,6 +18,15 @@
 #   auto         - probes Shopify and WooCommerce on the first poll and then
 #                  behaves like the detected one. For shops whose platform
 #                  isn't known for sure.
+#   ebay         - searches ebay.de for each query: Sofort-Kaufen, new,
+#                  located in Germany, cheapest first.
+#
+# render: true      html only. Loads pages in a hidden Chrome, for shops that
+#                   build their product list with JavaScript (MediaMarkt …).
+#                   Slower, so give these a longer interval.
+# require_reference: only listings that match a product in `prices` count.
+# best_per_product: only the cheapest offer per product counts (marketplaces).
+# exclude:          extra title words to skip for this shop.
 #
 # language: assumed edition when a title has no hint ("Japanisch", "DE",
 #           "M6a", "30 Jahre" …). "?" means unknown.
@@ -74,6 +83,8 @@ settings:
       - "auf lager"
       - "jetzt kaufen"
       - "add to cart"
+      - "in den einkaufswagen"
+      - "online verfügbar"
     unavailable:
       - "ausverkauft"
       - "nicht verfügbar"
@@ -84,6 +95,38 @@ settings:
       - "demnächst"
       - "sold out"
       - "out of stock"
+
+# Markup check. Every listing whose title matches a product below gets its
+# price compared with the reference: the official UVP for German products,
+# a typical import price ("Richtpreis") for Japanese ones, which have no
+# German UVP. Listings more than max_markup_percent above it are hidden and
+# never alerted (changeable in the window, null = no limit). Listings more
+# than min_markup_percent below it are dropped as implausible: a single
+# promo card, an empty box or a fake. First matching entry wins, so keep
+# specific names above generic ones.
+prices:
+  max_markup_percent: 50
+  min_markup_percent: -50
+  products:
+    # German UVPs from monsterdealz/pcgames (Sept 2026). Marked "geschätzt"
+    # where no official figure was found.
+    - {name: "Ultra-Premium-Kollektion", language: DE, uvp: 149.99, match: 'ultra[\s-]*premium'}  # geschätzt
+    - {name: "Top-Trainer-Box", language: DE, uvp: 54.99, match: 'top[\s-]*trainer'}
+    - {name: "Booster Bundle", language: DE, uvp: 29.99, match: 'booster[\s-]*bundle'}
+    - {name: "Poster-Kollektion", language: DE, uvp: 23.99, match: 'poster'}
+    - {name: "Ordner-Kollektion", language: DE, uvp: 23.99, match: 'ordner'}
+    - {name: "Tech-Sticker-Kollektion", language: DE, uvp: 18.99, match: 'tech[\s-]*sticker'}
+    - {name: "ex-Kollektion", language: DE, uvp: 24.99, match: 'feelinara|quajutsu|ex[\s-]*kollektion'}
+    - {name: "Knock-out-Kollektion", language: DE, uvp: 12.99, match: 'knock[\s-]*out'}  # geschätzt
+    - {name: "Mini Tin", language: DE, uvp: 13.99, match: 'mini[\s-]*tin'}
+    - {name: "2er-Pack-Blister", language: DE, uvp: 12.99, match: '2er[\s-]*pack|blister'}
+    # Japanese: yen UVP (Display 7.200 ¥, Premium Deck 6.200 ¥, Futuristic
+    # Box 27.500 ¥, Card Set 1.200 ¥) plus what German importers typically
+    # charge. Adjust to taste.
+    - {name: "FUTURISTIC BOX", language: JP, uvp: 300, kind: Richtpreis, match: 'futuristic'}
+    - {name: "Premium Deck Set", language: JP, uvp: 130, kind: Richtpreis, match: 'premium[\s-]*deck|espeon|umbreon'}
+    - {name: "Card Set", language: JP, uvp: 15, kind: Richtpreis, match: 'card[\s-]*set|カードセット'}
+    - {name: "Display (20 Booster)", language: JP, uvp: 160, kind: Richtpreis, match: 'display|booster[\s-]*box|\bbox\b'}
 
 shops:
   # --- Established shops (on) ---------------------------------------------
@@ -135,13 +178,109 @@ shops:
     language: JP
     assume_pokemon: true
     interval: 30
+
+  # --- Big retail chains (on) ----------------------------------------------
+  # JavaScript storefronts, read through the hidden browser every minute.
+  # They sell at UVP when they have stock, which is rare and short. Search
+  # URLs follow each shop's public search; if one shows `error`, its search
+  # address changed.
+  - name: MediaMarkt
+    platform: html
+    url: "https://www.mediamarkt.de"
+    search_url: "https://www.mediamarkt.de/de/search.html?query={q}"
+    queries: ["pokemon 30 jahre", "pokemon 30th celebration"]
+    render: true
+    interval: 60
+  - name: Saturn
+    platform: html
+    url: "https://www.saturn.de"
+    search_url: "https://www.saturn.de/de/search.html?query={q}"
+    queries: ["pokemon 30 jahre", "pokemon 30th celebration"]
+    render: true
+    interval: 60
+  - name: Müller
+    platform: html
+    url: "https://www.mueller.de"
+    search_url: "https://www.mueller.de/search/?q={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 60
   - name: Smyths Toys
     platform: html
     url: "https://www.smythstoys.com"
     pages: ["https://www.smythstoys.com/de/de-de/spielzeug/action-spielzeug/pokemon/pokemon-karten/pokemon-karten-top-trainer-box-30-jahre-edition/p/264148"]
-    language: DE
-    assume_pokemon: true
-    interval: 30
+    search_url: "https://www.smythstoys.com/de/de-de/search/?text={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 60
+  - name: Thalia
+    platform: html
+    url: "https://www.thalia.de"
+    search_url: "https://www.thalia.de/suche?sq={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 60
+  - name: Galeria
+    platform: html
+    url: "https://www.galeria.de"
+    search_url: "https://www.galeria.de/search?q={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 60
+  - name: Spiele Max
+    platform: html
+    url: "https://www.spiele-max.de"
+    search_url: "https://www.spiele-max.de/search?q={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 60
+  - name: Otto
+    platform: html
+    url: "https://www.otto.de"
+    search_url: "https://www.otto.de/suche/{q}/"
+    queries: ["pokemon 30 jahre", "pokemon 30th celebration"]
+    render: true
+    interval: 60
+    require_reference: true
+    best_per_product: true
+  - name: Amazon
+    platform: html
+    url: "https://www.amazon.de"
+    search_url: "https://www.amazon.de/s?k={q}"
+    queries: ["pokemon 30 jahre", "pokemon 30th celebration japanisch"]
+    render: true
+    interval: 90
+    require_reference: true
+    best_per_product: true
+  - name: Kaufland
+    platform: html
+    url: "https://www.kaufland.de"
+    search_url: "https://www.kaufland.de/s/?search_value={q}"
+    queries: ["pokemon 30 jahre"]
+    render: true
+    interval: 90
+    require_reference: true
+    best_per_product: true
+
+  # --- eBay (on) -----------------------------------------------------------
+  # Only products with a known UVP, only the cheapest offer per product, and
+  # only within the markup limit, so the flood of scalper listings stays out.
+  - name: eBay
+    platform: ebay
+    url: "https://www.ebay.de"
+    queries:
+      - "pokemon 30 jahre top trainer box"
+      - "pokemon 30 jahre booster bundle"
+      - "pokemon 30 jahre poster kollektion"
+      - "pokemon 30 jahre ordner kollektion"
+      - "pokemon 30 jahre tech sticker kollektion"
+      - "pokemon 30 jahre ultra premium kollektion"
+      - "pokemon 30th celebration display japanisch"
+      - "pokemon 30th celebration premium deck"
+    interval: 90
+    require_reference: true
+    best_per_product: true
+    exclude: ["promo", "leer", "ohne", "aus der", "aus top", "geöffnet", "sleeves", "hüllen", "code card", "lose ", "einzeln"]
 
   # --- Smaller shops (off) -------------------------------------------------
   # Little known, often far above retail price. Set enabled: true to watch

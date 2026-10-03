@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 PAGE = Path(__file__).with_name("ui.html")
 PORT_ATTEMPTS = 10
+MAX_BODY = 4096
 
 # Chromium browsers can open a page as a standalone app window without tabs
 # or address bar. Tried in order, the default browser is the fallback.
@@ -29,7 +30,7 @@ _MAC_APP_BROWSERS = ("Google Chrome", "Microsoft Edge", "Brave Browser", "Chromi
 _LINUX_APP_BROWSERS = ("google-chrome", "chromium", "chromium-browser", "microsoft-edge", "brave-browser")
 
 
-def _handler(snapshot: Callable[[], dict]):
+def _handler(snapshot: Callable[[], dict], actions: dict[str, Callable[[dict], dict]]):
     page = PAGE.read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
@@ -41,6 +42,24 @@ def _handler(snapshot: Callable[[], dict]):
                 self._send(200, "application/json", json.dumps(snapshot(), ensure_ascii=False).encode())
             else:
                 self._send(404, "text/plain", b"not found")
+
+        def do_POST(self):  # noqa: N802 - http.server API
+            action = actions.get(self.path.split("?", 1)[0].removeprefix("/api/"))
+            # Requiring a JSON content type keeps other websites from
+            # triggering actions: a cross-site form can't send one.
+            if action is None or not self.headers.get("Content-Type", "").startswith("application/json"):
+                self._send(404, "text/plain", b"not found")
+                return
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), MAX_BODY)
+                payload = json.loads(self.rfile.read(length) or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("JSON object expected")
+                result = action(payload)
+            except (ValueError, TypeError) as exc:
+                self._send(400, "application/json", json.dumps({"error": str(exc)}).encode())
+                return
+            self._send(200, "application/json", json.dumps(result).encode())
 
         def _send(self, status: int, content_type: str, body: bytes) -> None:
             self.send_response(status)
@@ -56,10 +75,11 @@ def _handler(snapshot: Callable[[], dict]):
     return Handler
 
 
-def serve(snapshot: Callable[[], dict], port: int) -> str:
+def serve(snapshot: Callable[[], dict], port: int, actions: dict[str, Callable[[dict], dict]] | None = None) -> str:
     """Starts the server in a background thread and returns its URL. Moves
-    to the next port if the requested one is taken."""
-    handler = _handler(snapshot)
+    to the next port if the requested one is taken. `actions` are exposed
+    as POST /api/<name> taking and returning JSON."""
+    handler = _handler(snapshot, actions or {})
     for candidate in range(port, port + PORT_ATTEMPTS):
         try:
             server = ThreadingHTTPServer(("127.0.0.1", candidate), handler)
