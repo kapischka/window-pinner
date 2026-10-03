@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +51,26 @@ def _notify_telegram(title: str, message: str) -> None:
         logger.warning("Telegram notification failed (%s); alert was still logged above", exc)
 
 
+def _notify_macos(title: str, message: str) -> None:
+    # plyer's macOS backend needs pyobjus, which rarely installs cleanly;
+    # osascript ships with every Mac. JSON string literals are valid
+    # AppleScript strings, quotes and newlines included.
+    def quote(text: str) -> str:
+        return json.dumps(text, ensure_ascii=False)
+
+    script = f'display notification {quote(message)} with title {quote(title)} sound name "Glass"'
+    subprocess.run(["osascript", "-e", script], check=True, capture_output=True, timeout=10)
+
+
 def notify(title: str, message: str) -> None:
     logger.info("ALERT: %s - %s", title, message)
     try:
-        from plyer import notification
+        if sys.platform == "darwin":
+            _notify_macos(title, message)
+        else:
+            from plyer import notification
 
-        notification.notify(title=title, message=message, timeout=15)
+            notification.notify(title=title, message=message, timeout=15)
     except Exception as exc:  # noqa: BLE001 - desktop notifications are best-effort
         logger.warning("desktop notification failed (%s); alert was still logged above", exc)
     _notify_discord(title, message)
