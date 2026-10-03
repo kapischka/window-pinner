@@ -1,8 +1,11 @@
+import json
+import urllib.request
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from pokemon_preorder_bot import catalog, live
+from pokemon_preorder_bot import catalog, live, ui
 from pokemon_preorder_bot.live import LiveMonitor, Settings, load_config
 from pokemon_preorder_bot.sources import (
     Listing,
@@ -224,7 +227,7 @@ def test_auto_platform_detection():
 def _monitor(tmp_path, monkeypatch, listings):
     settings = Settings({"languages": ["DE", "JP"], "include_unknown_language": False, "exclude": ["psa "]})
     shop = Shop(name="Testshop", platform="shopify", url="https://shop.de")
-    monitor = LiveMonitor(settings, [shop], tmp_path / "state.json", tmp_path / "results.json", open_browser=False)
+    monitor = LiveMonitor(settings, [shop], tmp_path / "state.json", tmp_path / "results.json")
     feed = iter(listings)
     monkeypatch.setattr(live, "poll_shop", lambda *args: (next(feed), True))
     return monitor, shop
@@ -330,3 +333,76 @@ def test_monitor_ignores_misses_on_partial_polls(tmp_path, monkeypatch):
     for _ in range(live.MISSES_UNTIL_GONE + 1):
         monitor.check(shop, None)
     assert monitor.products[ttb.url]["available"] is True
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Pokémon 30 Jahre Top-Trainer-Box Deutsch", False),
+        ("Pokémon 30 Jahre Top-Trainer-Box Deutsch (Vorbestellung)", True),
+        ("PREORDER Pokémon 30th Celebration Display M6a Japanisch", True),
+        ("Pokemon 30 Jahre Ordner Kollektion DE ab 16.10.2026", True),
+        ("30 Jahre Booster Bundle Release 02.10.2026", False),  # date passed, it's out
+        ("30th Celebration Card Set 予約", True),
+    ],
+)
+def test_looks_preorder(text, expected):
+    assert catalog.looks_preorder(text, today=date(2026, 10, 3)) is expected
+
+
+def test_parsers_flag_preorders():
+    suggest = {"resources": {"results": {"products": [
+        {"title": "Pokémon 30 Jahre Top-Trainer-Box", "url": "/products/a", "available": True, "tags": ["Vorbestellung"]},
+        {"title": "Pokémon 30 Jahre Poster-Kollektion", "url": "/products/b", "available": True, "tags": "Neuheit, Pokemon"},
+    ]}}}
+    flags = {l.url[-1]: l.preorder for l in parse_shopify_suggest(suggest, "https://s.de")}
+    assert flags == {"a": True, "b": False}
+
+    collection = {"products": [{"title": "30th Celebration Display JP", "handle": "d", "tags": [],
+                                "variants": [{"title": "Pre-Order", "available": True}]}]}
+    assert parse_shopify_collection(collection, "https://s.de")[0].preorder is True
+
+    woo = [{"name": "30 Jahre Booster Bundle", "permalink": "https://w.de/p/", "is_in_stock": True,
+            "is_on_backorder": False, "stock_availability": {"class": "available-on-backorder"}}]
+    assert parse_woocommerce(woo, "https://w.de")[0].preorder is True
+
+    html = """<script type="application/ld+json">{"@type": "Product", "name": "Pokémon 30th Celebration Display JP",
+      "offers": {"availability": "https://schema.org/PreOrder"}}</script>"""
+    [listing] = parse_html(html, "https://h.de/p", accept, PATTERNS)
+    assert listing.available is True and listing.preorder is True
+
+
+def test_monitor_hides_preorders_unless_enabled(tmp_path, monkeypatch):
+    rounds = [[
+        Listing("Pokémon 30 Jahre Top-Trainer-Box Deutsch", "https://shop.de/products/ttb", True, preorder=True),
+        Listing("Pokémon 30 Jahre Ordner-Kollektion DE ab 24.12.2099", "https://shop.de/products/ordner", True),
+        Listing("Pokémon 30 Jahre Poster-Kollektion Deutsch", "https://shop.de/products/poster", True),
+    ]]
+    monitor, shop = _monitor(tmp_path, monkeypatch, rounds * 2)
+    assert [p["url"] for p in monitor.check(shop, None)] == ["https://shop.de/products/poster"]
+    assert monitor.products["https://shop.de/products/ttb"]["preorder"] is True
+
+    monitor.settings.include_preorders = True
+    assert len(monitor.check(shop, None)) == 2
+
+
+def test_window_serves_page_and_state(tmp_path, monkeypatch):
+    monitor, shop = _monitor(tmp_path, monkeypatch, [[Listing("30th Celebration Display JP", "https://shop.de/d", True)]])
+    monitor.check(shop, None)
+    url = ui.serve(monitor.snapshot, 18765)
+    with urllib.request.urlopen(url, timeout=5) as resp:
+        assert b"30 Jahre Radar" in resp.read()
+    with urllib.request.urlopen(url + "api/state", timeout=5) as resp:
+        state = json.load(resp)
+    assert state["products"][0]["url"] == "https://shop.de/d"
+    assert state["shops"]["Testshop"]["status"] == "ok"
+    # A second server falls back to the next free port instead of crashing.
+    assert ui.serve(monitor.snapshot, int(url.rsplit(":", 1)[1].strip("/"))) != url
+
+
+def test_shipped_config_hides_preorders_and_small_shops():
+    settings, shops = load_config(ROOT / "config" / "live_shops.yaml")
+    assert settings.include_preorders is False
+    on = {s.name for s in shops if s.enabled}
+    assert {"cardcosmos", "Card-Corner", "TRADER"} <= on
+    assert "Rot der Sammler" not in on

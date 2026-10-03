@@ -21,6 +21,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .fetcher import USER_AGENT
+from .catalog import looks_preorder
 from .matcher import (
     STATUSES_ACTIONABLE,
     classify_status,
@@ -43,9 +44,10 @@ _BLOCK_STATUS_CODES = {403, 429, 503}
 class Listing:
     title: str
     url: str
-    available: bool | None  # None: listed, but no clear stock signal
+    available: bool | None  # orderable at all; None: listed, but no clear stock signal
     price: str = ""
     context: str = ""  # vendor / product type, used to confirm "is Pokémon"
+    preorder: bool = False  # orderable, but ships later
 
 
 @dataclass
@@ -104,6 +106,11 @@ def _price_from_text(value) -> str:
 # --- parsers ------------------------------------------------------------------
 
 
+def _tags(value) -> str:
+    """Shopify sends tags as a list or as one comma separated string."""
+    return " ".join(value) if isinstance(value, list) else str(value or "")
+
+
 def parse_shopify_suggest(data: dict, base_url: str) -> list[Listing]:
     products = data.get("resources", {}).get("results", {}).get("products", [])
     return [
@@ -113,6 +120,7 @@ def parse_shopify_suggest(data: dict, base_url: str) -> list[Listing]:
             available=p.get("available"),
             price=_price_from_text(p.get("price")),
             context=f"{p.get('vendor', '')} {p.get('type', '')}",
+            preorder=looks_preorder(f"{p.get('title', '')} {p.get('type', '')} {_tags(p.get('tags'))}"),
         )
         for p in products
         if p.get("title") and p.get("url")
@@ -132,6 +140,12 @@ def parse_shopify_collection(data: dict, base_url: str) -> list[Listing]:
                 available=any(v.get("available") for v in variants) if variants else None,
                 price=_price_from_text(variants[0].get("price")) if variants else "",
                 context=f"{p.get('vendor', '')} {p.get('product_type', '')}",
+                preorder=looks_preorder(
+                    " ".join(
+                        [p["title"], p.get("product_type", ""), _tags(p.get("tags"))]
+                        + [str(v.get("title", "")) for v in variants]
+                    )
+                ),
             )
         )
     return listings
@@ -149,23 +163,29 @@ def parse_woocommerce(data: list, base_url: str) -> list[Listing]:
                 price = _format_euro(int(prices["price"]) / 10 ** int(prices.get("currency_minor_unit", 2)))
             except (TypeError, ValueError):
                 pass
+        categories = " ".join(c.get("name", "") for c in p.get("categories") or [])
+        stock = p.get("stock_availability") or {}
         listings.append(
             Listing(
                 title=html_lib.unescape(p["name"]),
                 url=canonical_url(urljoin(base_url, p["permalink"])),
                 available=bool(p.get("is_in_stock") and p.get("is_purchasable", True)),
                 price=price,
-                context=" ".join(c.get("name", "") for c in p.get("categories") or []),
+                context=categories,
+                preorder=bool(p.get("is_on_backorder"))
+                or "backorder" in str(stock.get("class", ""))
+                or looks_preorder(f"{p['name']} {categories} {stock.get('text', '')}"),
             )
         )
     return listings
 
 
-def _available_from_schema(value) -> bool | None:
+def _from_schema(value) -> tuple[bool | None, bool]:
+    """(available, preorder) from a schema.org availability value."""
     status = status_from_availability(value)
     if status is None or status == "unknown":
-        return None
-    return status in STATUSES_ACTIONABLE
+        return None, False
+    return status in STATUSES_ACTIONABLE, status == "preorder"
 
 
 def _itemprop_value(scope, prop: str) -> str:
@@ -196,12 +216,14 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
             if len(blocks) > 1:
                 continue  # can't tell which listing it belongs to, the card fallback below can
             url = page_url  # a product page describing itself
+        available, preorder = _from_schema(offer.get("availability"))
         add(
             Listing(
                 title=html_lib.unescape(str(block.get("name", ""))).strip(),
                 url=canonical_url(urljoin(page_url, url)),
-                available=_available_from_schema(offer.get("availability")),
+                available=available,
                 price=_price_from_text(offer.get("price") or offer.get("lowPrice")),
+                preorder=preorder,
             )
         )
 
@@ -209,12 +231,14 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
     for scope in soup.select('[itemtype*="schema.org/Product"]'):
         link = scope.find("a", href=True)
         url = _itemprop_value(scope, "url") or (link["href"] if link else page_url)
+        available, preorder = _from_schema(_itemprop_value(scope, "availability"))
         add(
             Listing(
                 title=_itemprop_value(scope, "name"),
                 url=canonical_url(urljoin(page_url, url)),
-                available=_available_from_schema(_itemprop_value(scope, "availability")),
+                available=available,
                 price=_price_from_text(_itemprop_value(scope, "price")),
+                preorder=preorder,
             )
         )
 
@@ -226,13 +250,16 @@ def parse_html(html: str, page_url: str, accept: Callable[[str], bool], patterns
         if url in found:
             continue
         card = find_card_container(link)
-        status = classify_status(
-            card.get_text(" ", strip=True) if card else "",
-            patterns.preorder,
-            patterns.in_stock,
-            patterns.unavailable,
+        card_text = card.get_text(" ", strip=True) if card else ""
+        status = classify_status(card_text, patterns.preorder, patterns.in_stock, patterns.unavailable)
+        add(
+            Listing(
+                title=title,
+                url=url,
+                available=None if status == "unknown" else status in STATUSES_ACTIONABLE,
+                preorder=status == "preorder" or looks_preorder(card_text),
+            )
         )
-        add(Listing(title=title, url=url, available=None if status == "unknown" else status in STATUSES_ACTIONABLE))
 
     return [listing for listing in found.values() if accept(listing.title)]
 
@@ -375,8 +402,13 @@ def poll_shop(
     unique: dict[str, Listing] = {}
     for listing in listings:
         # A collection hit and a search hit for the same product can
-        # disagree for a few seconds while caches catch up; trust "available".
+        # disagree for a few seconds while caches catch up; trust
+        # "available", and a preorder hint from either source.
         prev = unique.get(listing.url)
         if prev is None or (listing.available and not prev.available):
+            if prev is not None:
+                listing.preorder = listing.preorder or prev.preorder
             unique[listing.url] = listing
+        else:
+            prev.preorder = prev.preorder or listing.preorder
     return list(unique.values()), complete

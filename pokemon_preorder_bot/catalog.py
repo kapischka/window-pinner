@@ -5,6 +5,7 @@ where a shop exposes it)."""
 from __future__ import annotations
 
 import re
+from datetime import date
 
 # Unique enough on their own: the set's international name ("30th
 # Celebration", also used verbatim in Japan) and the Japanese set code.
@@ -77,6 +78,30 @@ def language(title: str, default: str = UNKNOWN_LANGUAGE) -> str:
             if pattern.search(title):
                 return lang
     return default
+
+
+# Wording German shops use for stock that can be ordered but isn't there
+# yet. Checked against titles, tags, categories and stock texts. Phrases
+# like "Release 02.10." or "lieferbar ab" are left to the date check below,
+# since shops keep them in titles long after the release.
+_PREORDER = re.compile(r"vorbestell|vorverkauf|pre[\s-]?order|\bvvk\b|reservier|backorder|予約", re.IGNORECASE)
+_DATE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})\b")
+
+
+def looks_preorder(text: str, today: date | None = None) -> bool:
+    """True if the text announces a preorder, either in words or by naming a
+    date that hasn't been reached yet ("Top-Trainer-Box ab 16.10.2026")."""
+    if _PREORDER.search(text):
+        return True
+    today = today or date.today()
+    for day, month, year in _DATE.findall(text):
+        try:
+            when = date(int(year) + (2000 if len(year) == 2 else 0), int(month), int(day))
+        except ValueError:
+            continue
+        if when > today:
+            return True
+    return False
 
 
 def is_excluded(title: str, excludes: list[str]) -> bool:

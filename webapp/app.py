@@ -7,11 +7,10 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for
 
 from pokemon_preorder_bot.config import Target, load_defaults, load_targets, save_targets
 from pokemon_preorder_bot.main import DEFAULT_CONFIG, DEFAULT_LOG, DEFAULT_RESULTS, DEFAULT_STATE
-from pokemon_preorder_bot.live import DEFAULT_RESULTS as LIVE_RESULTS_PATH
 from pokemon_preorder_bot.main import parse_args, run
 from pokemon_preorder_bot.notifier import notify, setup_logging
 
@@ -289,22 +288,6 @@ def delete_target(target_id: str):
     save_targets(CONFIG_PATH, targets)
     flash(f"Deleted target '{target_id}'.", "success")
     return redirect(url_for("targets_page"))
-
-
-@app.route("/live")
-def live_page():
-    return render_template("live.html")
-
-
-@app.route("/live.json")
-def live_json():
-    """Written continuously by `python -m pokemon_preorder_bot.live`; the
-    page polls this every 2 s."""
-    try:
-        return jsonify(json.loads(Path(LIVE_RESULTS_PATH).read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        # Missing, or caught mid-replace on a platform without atomic rename.
-        return jsonify({"updated": None, "shops": {}, "products": []})
 
 
 @app.route("/logs")

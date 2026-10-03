@@ -2,7 +2,7 @@
 products (German or Japanese edition) and alerts the moment one becomes
 orderable.
 
-    python -m pokemon_preorder_bot.live            # run until Ctrl+C
+    python -m pokemon_preorder_bot.live            # run until Ctrl+C, opens its window
     python -m pokemon_preorder_bot.live --once     # one pass, print a table
 """
 
@@ -15,14 +15,13 @@ import os
 import random
 import threading
 import time
-import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from . import catalog
+from . import catalog, ui
 from .main import ROOT
 from .notifier import notify, setup_logging
 from .sources import Listing, PollError, Shop, StatusPatterns, new_session, poll_shop
@@ -56,6 +55,7 @@ class Settings:
         self.interval = max(float(raw.get("interval_seconds", 10)), MIN_INTERVAL)
         self.languages = {lang.upper() for lang in raw.get("languages", ["DE", "JP"])}
         self.include_unknown_language = bool(raw.get("include_unknown_language", True))
+        self.include_preorders = bool(raw.get("include_preorders", False))
         self.queries = list(raw.get("queries", []))
         self.exclude = list(raw.get("exclude", []))
         patterns = raw.get("status_patterns", {})
@@ -95,14 +95,12 @@ class LiveMonitor:
         shops: list[Shop],
         state_path: Path,
         results_path: Path,
-        open_browser: bool = False,
         persist_state: bool = True,
     ):
         self.settings = settings
         self.shops = [s for s in shops if s.enabled]
         self.state_path = state_path
         self.results_path = results_path
-        self.open_browser = open_browser
         self.persist_state = persist_state
         self.lock = threading.Lock()
         self.stop = threading.Event()
@@ -148,19 +146,30 @@ class LiveMonitor:
             # file; the next poll writes it again a few seconds later.
             logger.debug("could not write %s: %s", path, exc)
 
-    def _save(self) -> None:
-        """Caller holds self.lock."""
+    def _snapshot_unlocked(self) -> dict:
         active = {s.name for s in self.shops}
         products = sorted(
-            (p for p in self.products.values() if p["shop"] in active),
-            key=lambda p: (not p["available"], p["shop"], p["title"]),
+            (dict(p) for p in self.products.values() if p["shop"] in active),
+            key=lambda p: (not p["available"], p["since"]),
         )
+        return {
+            "updated": _now(),
+            "interval_seconds": self.settings.interval,
+            "languages": sorted(self.settings.languages),
+            "shops": {name: dict(status) for name, status in self.shop_status.items()},
+            "products": products,
+        }
+
+    def snapshot(self) -> dict:
+        """Current state for the window, safe to call from any thread."""
+        with self.lock:
+            return self._snapshot_unlocked()
+
+    def _save(self) -> None:
+        """Caller holds self.lock."""
         if self.persist_state:
             self._write_json(self.state_path, self.products)
-        self._write_json(
-            self.results_path,
-            {"updated": _now(), "interval_seconds": self.settings.interval, "shops": self.shop_status, "products": products},
-        )
+        self._write_json(self.results_path, self._snapshot_unlocked())
 
     # --- polling ----------------------------------------------------------
 
@@ -193,7 +202,12 @@ class LiveMonitor:
                 seen.add(listing.url)
                 prev = self.products.get(listing.url, {})
                 was_available = prev.get("available", False)
-                available = was_available if listing.available is None else listing.available
+                preorder = listing.preorder or catalog.looks_preorder(listing.title)
+                if listing.available is None:
+                    available = was_available
+                else:
+                    # "available" means: can be bought and shipped now.
+                    available = listing.available and (self.settings.include_preorders or not preorder)
                 record = {
                     "shop": shop.name,
                     "title": listing.title,
@@ -201,6 +215,7 @@ class LiveMonitor:
                     "price": listing.price or prev.get("price", ""),
                     "language": lang,
                     "available": available,
+                    "preorder": preorder,
                     "since": prev.get("since", now) if available == was_available and prev else now,
                     "last_seen": now,
                     "misses": 0,
@@ -230,8 +245,6 @@ class LiveMonitor:
         title = f"🟢 {shop.name}: {fresh[0]['title']}" if len(fresh) == 1 else f"🟢 {shop.name}: {len(fresh)} Produkte verfügbar"
         print("\a", end="", flush=True)
         notify(title, "\n".join(lines))
-        if self.open_browser:
-            webbrowser.open(fresh[0]["url"])
 
     def _shop_loop(self, shop: Shop) -> None:
         session = new_session()
@@ -255,7 +268,16 @@ class LiveMonitor:
                 continue
             delay *= random.uniform(1 - JITTER, 1 + JITTER)
 
-    def run_forever(self) -> None:
+    def run_forever(self, port: int | None = None, open_window: bool = True) -> None:
+        if port is not None:
+            try:
+                url = ui.serve(self.snapshot, port)
+            except OSError as exc:
+                logger.warning("Fenster nicht verfügbar: %s", exc)
+            else:
+                logger.info("Fenster: %s", url)
+                if open_window:
+                    ui.open_window(url)
         logger.info(
             "Live-Monitor gestartet: %d Shops, alle %.0f s, Sprachen %s",
             len(self.shops),
@@ -304,7 +326,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--interval", type=float, help=f"Sekunden zwischen zwei Abfragen pro Shop (min. {MIN_INTERVAL:.0f})")
     parser.add_argument("--languages", help="z. B. DE,JP (Standard aus der Config)")
     parser.add_argument("--once", action="store_true", help="Jeden Shop einmal abfragen, Tabelle ausgeben, beenden")
-    parser.add_argument("--open", action="store_true", help="Neu verfügbare Produkte direkt im Browser öffnen")
+    parser.add_argument("--port", type=int, default=8765, help="Port des Fensters (Standard 8765)")
+    parser.add_argument("--no-window", action="store_true", help="Fenster nicht automatisch öffnen")
+    parser.add_argument("--no-ui", action="store_true", help="Ganz ohne Fenster, nur Terminal und Benachrichtigungen")
     return parser.parse_args(argv)
 
 
@@ -319,11 +343,11 @@ def main(argv=None) -> None:
         settings.languages = {lang.strip().upper() for lang in args.languages.split(",") if lang.strip()}
     # --once is a look, not a baseline: it must not swallow the first alert
     # of the live run that follows.
-    monitor = LiveMonitor(settings, shops, Path(args.state), Path(args.results), args.open, persist_state=not args.once)
+    monitor = LiveMonitor(settings, shops, Path(args.state), Path(args.results), persist_state=not args.once)
     if args.once:
         monitor.run_once()
     else:
-        monitor.run_forever()
+        monitor.run_forever(port=None if args.no_ui else args.port, open_window=not args.no_window)
 
 
 if __name__ == "__main__":

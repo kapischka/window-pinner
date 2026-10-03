@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>30 Jahre Radar</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23fff' stroke='%2315171a' stroke-width='3'/%3E%3Cpath d='M2 16a14 14 0 0 1 28 0z' fill='%23e3350d' stroke='%2315171a' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23fff' stroke='%2315171a' stroke-width='3'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #f0f1f4;
+    --text: #15171a;
+    --muted: #6a707b;
+    --border: #e3e5e9;
+    --accent: #e3350d;
+    --accent-text: #ffffff;
+    --ok: #12a150;
+    --ok-soft: #e3f6eb;
+    --warn: #c77700;
+    --warn-soft: #fdf1dc;
+    --bad: #d6332a;
+    --de: #1f6feb;
+    --jp: #c2185b;
+    --unknown: #6a707b;
+    --shadow: 0 1px 2px rgba(16, 18, 22, 0.06), 0 4px 16px rgba(16, 18, 22, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101215;
+      --surface: #181b20;
+      --surface-2: #20242a;
+      --text: #eceef1;
+      --muted: #979ea9;
+      --border: #2a2f36;
+      --accent: #ff5a36;
+      --ok: #34c77b;
+      --ok-soft: #173126;
+      --warn: #f0a63a;
+      --warn-soft: #33270f;
+      --bad: #ff6b61;
+      --de: #5b9dff;
+      --jp: #f06292;
+      --unknown: #979ea9;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 50%; flex: none;
+    background: linear-gradient(var(--accent) 0 47%, #15171a 47% 53%, #fff 53%);
+    box-shadow: inset 0 0 0 3px #15171a;
+    position: relative;
+  }
+  .logo::after {
+    content: ""; position: absolute; inset: 13px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 0 3px #15171a;
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .head-text { flex: 1 1 220px; min-width: 0; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    background: var(--ok-soft); color: var(--ok);
+  }
+  .pill.offline { background: var(--warn-soft); color: var(--warn); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill:not(.offline) .dot { animation: pulse 1.6s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 100% { box-shadow: 0 0 0 7px transparent; } }
+
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+  .seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600;
+    padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .spacer { flex: 1; }
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn[aria-pressed="true"] { border-color: var(--ok); color: var(--ok); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .stat span { color: var(--muted); font-size: 13px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow);
+    transition: border-color 0.3s;
+  }
+  .card.new { border-color: var(--ok); animation: glow 2s ease-out 3; }
+  @keyframes glow { 0% { box-shadow: 0 0 0 0 var(--ok); } 100% { box-shadow: 0 0 0 10px transparent; } }
+  .card-top { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .lang { font-weight: 700; color: #fff; border-radius: 6px; padding: 2px 7px; font-size: 11px; letter-spacing: 0.04em; }
+  .lang-DE { background: var(--de); }
+  .lang-JP { background: var(--jp); }
+  .lang-x { background: var(--unknown); }
+  .tag-new { color: var(--ok); font-weight: 700; }
+  .card-title { font-weight: 600; overflow-wrap: anywhere; }
+  .card-bottom { display: flex; align-items: center; gap: 10px; margin-top: auto; }
+  .price { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .shop-name { color: var(--muted); font-size: 13px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .go {
+    background: var(--accent); color: var(--accent-text); text-decoration: none; font-weight: 600;
+    padding: 8px 13px; border-radius: 9px; font-size: 14px; white-space: nowrap;
+  }
+  .go:hover { filter: brightness(1.08); }
+
+  .empty {
+    background: var(--surface); border: 1px dashed var(--border); border-radius: 14px;
+    padding: 36px 20px; text-align: center; color: var(--muted);
+  }
+  .empty b { display: block; color: var(--text); font-size: 16px; margin-bottom: 4px; }
+
+  h2 { font-size: 15px; margin: 30px 0 10px; display: flex; align-items: baseline; gap: 8px; }
+  h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .shops { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  .shop {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 12px; display: flex; align-items: center; gap: 9px; font-size: 14px; min-width: 0;
+  }
+  .shop .dot { flex: none; }
+  .shop-ok { color: var(--ok); }
+  .shop-error, .shop-blocked { color: var(--bad); }
+  .shop-pending { color: var(--unknown); }
+  .shop-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .shop-detail { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo" aria-hidden="true"></div>
+    <div class="head-text">
+      <h1>30 Jahre Radar</h1>
+      <div class="sub">Pokémon 30 Jahre und 30th Celebration, nur sofort lieferbar</div>
+    </div>
+    <span class="pill offline" id="pill"><span class="dot"></span><span id="pill-text">Verbinde …</span></span>
+  </header>
+
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Sprache">
+      <button data-lang="" aria-pressed="true">Alle</button>
+      <button data-lang="DE" aria-pressed="false">Deutsch</button>
+      <button data-lang="JP" aria-pressed="false">Japanisch</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="sound" aria-pressed="false">🔈 Ton aus</button>
+    <button class="btn" id="notify" aria-pressed="false">🔕 Mitteilungen aus</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="stat-available">–</b><span>sofort lieferbar</span></div>
+    <div class="stat"><b id="stat-shops">–</b><span>Shops erreichbar</span></div>
+    <div class="stat"><b id="stat-interval">–</b><span>Abfrage pro Shop</span></div>
+    <div class="stat"><b id="stat-updated">–</b><span>letzte Prüfung</span></div>
+  </div>
+
+  <div id="products" class="grid"></div>
+  <div id="empty" class="empty" hidden>
+    <b>Gerade nichts sofort lieferbar</b>
+    Das Radar prüft weiter. Sobald etwas auftaucht, erscheint es hier mit Ton und Mitteilung.
+  </div>
+
+  <h2>Shops <small id="shops-summary"></small></h2>
+  <div id="shops" class="shops"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_MS = 1500;
+  var NEW_FOR_MS = 3 * 60 * 1000;
+
+  var state = null;
+  var drawn = "";              // signature of what the grid currently shows
+  var known = null;            // urls available at the previous poll, null before the first poll
+  var firstSeen = {};          // url -> timestamp this window first saw it available
+  var lang = load("lang", "");
+  var soundOn = load("sound", "0") === "1";
+  var audio = null;
+
+  function load(key, fallback) {
+    try { var v = localStorage.getItem("radar." + key); return v === null ? fallback : v; } catch (e) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem("radar." + key, value); } catch (e) { /* private mode */ }
+  }
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function ago(iso) {
+    if (!iso) return "–";
+    var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return "vor " + s + " s";
+    if (s < 3600) return "vor " + Math.round(s / 60) + " min";
+    return "seit " + iso.slice(11, 16);
+  }
+
+  // --- sound and notifications -------------------------------------------
+
+  function beep() {
+    if (!soundOn) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.18].forEach(function (offset, i) {
+        var osc = audio.createOscillator();
+        var gain = audio.createGain();
+        osc.frequency.value = i ? 1320 : 880;
+        gain.gain.setValueAtTime(0.0001, audio.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + offset + 0.16);
+        osc.connect(gain).connect(audio.destination);
+        osc.start(audio.currentTime + offset);
+        osc.stop(audio.currentTime + offset + 0.17);
+      });
+    } catch (e) { /* no audio device */ }
+  }
+
+  function notifyNew(products) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    var first = products[0];
+    var body = products.length === 1
+      ? first.shop + " · " + (first.price || "")
+      : products.length + " Produkte, zuerst " + first.title;
+    var n = new Notification(products.length === 1 ? first.title : "Neu lieferbar", { body: body, tag: first.url });
+    n.onclick = function () { window.focus(); window.open(first.url, "_blank", "noopener"); n.close(); };
+  }
+
+  function renderSoundButton() {
+    var b = document.getElementById("sound");
+    b.setAttribute("aria-pressed", String(soundOn));
+    b.textContent = soundOn ? "🔊 Ton an" : "🔈 Ton aus";
+  }
+
+  function renderNotifyButton() {
+    var b = document.getElementById("notify");
+    var supported = "Notification" in window;
+    var granted = supported && Notification.permission === "granted";
+    b.hidden = !supported;
+    b.setAttribute("aria-pressed", String(granted));
+    b.textContent = granted ? "🔔 Mitteilungen an" : "🔕 Mitteilungen aus";
+  }
+
+  document.getElementById("sound").addEventListener("click", function () {
+    soundOn = !soundOn;
+    save("sound", soundOn ? "1" : "0");
+    renderSoundButton();
+    beep(); // also unlocks audio, browsers only allow it after a click
+  });
+
+  document.getElementById("notify").addEventListener("click", function () {
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then(renderNotifyButton);
+    } else if (Notification.permission === "denied") {
+      alert("Mitteilungen sind für diese Seite blockiert. Erlaube sie in den Browser Einstellungen.");
+    }
+  });
+
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      lang = b.dataset.lang;
+      save("lang", lang);
+      render(true);
+    });
+  });
+
+  // --- rendering ----------------------------------------------------------
+
+  function card(p) {
+    var isNew = Date.now() - (firstSeen[p.url] || 0) < NEW_FOR_MS;
+    var c = el("article", "card" + (isNew ? " new" : ""));
+
+    var top = el("div", "card-top");
+    var code = p.language === "DE" || p.language === "JP" ? p.language : "?";
+    top.append(el("span", "lang " + (code === "?" ? "lang-x" : "lang-" + code), code === "?" ? "SPRACHE ?" : code));
+    if (isNew) top.append(el("span", "tag-new", "NEU"));
+    top.append(el("span", "", "lieferbar " + ago(p.since)));
+    c.append(top);
+
+    c.append(el("div", "card-title", p.title));
+
+    var bottom = el("div", "card-bottom");
+    bottom.append(el("span", "price", p.price || ""));
+    bottom.append(el("span", "shop-name", p.shop));
+    var go = el("a", "go", "Zum Shop ↗");
+    go.href = p.url;
+    go.target = "_blank";
+    go.rel = "noopener";
+    bottom.append(go);
+    c.append(bottom);
+    return c;
+  }
+
+  function shopNames() {
+    return Object.keys(state.shops).sort(function (a, b) { return a.localeCompare(b, "de"); });
+  }
+
+  // Cheap part, every poll: counters and timestamps.
+  function renderStats() {
+    if (!state) return;
+    var names = shopNames();
+    var ok = names.filter(function (n) { return state.shops[n].status === "ok"; }).length;
+    var checks = names.map(function (n) { return state.shops[n].last_check; }).filter(Boolean).sort();
+    document.getElementById("stat-available").textContent = state.products.filter(function (p) { return p.available; }).length;
+    document.getElementById("stat-shops").textContent = ok + " / " + names.length;
+    document.getElementById("stat-interval").textContent = Math.round(state.interval_seconds) + " s";
+    document.getElementById("stat-updated").textContent = checks.length ? ago(checks[checks.length - 1]) : "–";
+    document.getElementById("shops-summary").textContent = ok + " von " + names.length + " erreichbar";
+  }
+
+  // Grid and shop list, only when something visible changed (or force), so
+  // card animations aren't restarted by every poll.
+  function render(force) {
+    document.querySelectorAll(".seg button").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
+    });
+    if (!state) return;
+    renderStats();
+
+    var shown = state.products.filter(function (p) { return p.available && (!lang || p.language === lang); });
+    shown.sort(function (a, b) { return (b.since || "").localeCompare(a.since || ""); });
+    var names = shopNames();
+    var signature = JSON.stringify([lang, shown, names.map(function (n) { return [n, state.shops[n].status]; })]);
+    if (!force && signature === drawn) return;
+    drawn = signature;
+
+    var grid = document.getElementById("products");
+    grid.replaceChildren.apply(grid, shown.map(card));
+    document.getElementById("empty").hidden = shown.length > 0;
+
+    var shops = document.getElementById("shops");
+    shops.replaceChildren.apply(shops, names.map(function (name) {
+      var s = state.shops[name];
+      var row = el("div", "shop shop-" + s.status);
+      row.title = s.detail || s.status;
+      row.append(el("span", "dot"));
+      row.append(el("span", "shop-label", name));
+      row.append(el("span", "shop-detail", s.status === "ok" ? ago(s.last_check) : s.status === "pending" ? "startet" : "Fehler"));
+      return row;
+    }));
+  }
+
+  function setOnline(online) {
+    document.getElementById("pill").classList.toggle("offline", !online);
+    document.getElementById("pill-text").textContent = online ? "Live" : "Bot läuft nicht";
+  }
+
+  function poll() {
+    fetch("/api/state", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (data) {
+        state = data;
+        setOnline(true);
+        var now = Date.now();
+        var current = {};
+        var fresh = [];
+        data.products.forEach(function (p) {
+          if (!p.available) return;
+          current[p.url] = true;
+          if (known && !known[p.url]) { fresh.push(p); firstSeen[p.url] = now; }
+        });
+        known = current;
+        if (fresh.length) { beep(); notifyNew(fresh); }
+        render();
+      })
+      .catch(function () { setOnline(false); });
+  }
+
+  renderSoundButton();
+  renderNotifyButton();
+  render();
+  poll();
+  setInterval(poll, POLL_MS);
+  setInterval(function () { render(true); }, 15000); // keeps "vor 12 s" texts fresh
+})();
+</script>
+</body>
+</html>

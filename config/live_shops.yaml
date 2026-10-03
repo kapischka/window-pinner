@@ -24,6 +24,7 @@
 # assume_pokemon: the page only lists Pokémon products, so generic wording
 #           like "30 Jahre" counts even without "Pokémon" in the title.
 # interval: per-shop override of settings.interval_seconds.
+# enabled:  false switches a shop off without deleting it.
 #
 # All URLs come from web research (Oct 2026). Run `--once` after changes: a
 # shop showing `error` has a wrong platform/URL, `blocked` means it rate
@@ -33,6 +34,9 @@ settings:
   interval_seconds: 10
   languages: [DE, JP]
   include_unknown_language: true
+  # Preorders ("Vorbestellung", "Pre-Order", a release date still ahead …)
+  # are hidden, only stock that ships now counts. true shows them again.
+  include_preorders: false
   queries:
     - "30th celebration"
     - "30 jahre"
@@ -57,9 +61,12 @@ settings:
   # Only used for html shops without structured data.
   status_patterns:
     preorder:
-      - "jetzt vorbestellen"
       - "vorbestellen"
-      - "pre-order now"
+      - "vorbestellung"
+      - "vorbestellbar"
+      - "vorverkauf"
+      - "pre-order"
+      - "preorder"
     in_stock:
       - "in den warenkorb"
       - "sofort lieferbar"
@@ -79,87 +86,13 @@ settings:
       - "out of stock"
 
 shops:
-  # --- Shopify -----------------------------------------------------------
+  # --- Established shops (on) ---------------------------------------------
+  # Long-running German TCG retailers with Trusted Shops ratings or a
+  # physical store, plus big retail chains.
   - name: cardcosmos
     platform: shopify
     url: "https://cardcosmos.de"
-    collections: [pokemon-30th-celebration, pokemon-30th-celebration-vorbestellen, pre-order-the-pokemon-30th-celebration]
-  - name: Yonko TCG
-    platform: shopify
-    url: "https://yonko-tcg.de"
-    collections: [30th-celebration-30-jahre]
-  - name: 2Sleeve
-    platform: shopify
-    url: "https://www.2sleeve.de"
-  - name: Chief Cards
-    platform: shopify
-    url: "https://chiefcards.de"
-  - name: Pokitrio
-    platform: shopify
-    url: "https://www.pokitrio.de"
-    assume_pokemon: true
-  - name: Rot der Sammler
-    platform: shopify
-    url: "https://www.rotdersammler.de"
-  - name: Mythracards
-    platform: shopify
-    url: "https://mythracards.com"
-  - name: PushDich TCG
-    platform: shopify
-    url: "https://www.pushdich-tcg.de"
-  - name: Toy Treasure
-    platform: shopify
-    url: "https://toy-treasure.com"
-  - name: KARDS Greifswald
-    platform: shopify
-    url: "https://kardsgreifswald.de"
-  - name: Play-Cards
-    platform: shopify
-    url: "https://play-cards.de"
-  - name: TCGViert
-    platform: shopify
-    url: "https://tcgviert.com"
-  - name: Feenturm
-    platform: shopify
-    url: "https://feenturm.de"
-  - name: Schatztruhe
-    platform: shopify
-    url: "https://schatztruhe-shop.de"
-  - name: Racoon Rises
-    platform: shopify
-    url: "https://racoon-rises.com"
-  - name: Spiel-es
-    platform: shopify
-    url: "https://spiel-es.de"
-    collections: [vorbestellungen, pokemon-kollektionen]
-  - name: Geeks Heaven
-    platform: shopify
-    url: "https://geeksheaven.de"
-  - name: Just Nerds TCG
-    platform: shopify
-    url: "https://justnerdstcg.de"
-  - name: Fantasia Cards
-    platform: shopify
-    url: "https://fantasiacards.de"
-    collections: [30th-celebration]
-
-  # --- WooCommerce -------------------------------------------------------
-  - name: Zambomba
-    platform: woocommerce
-    url: "https://www.zambomba.de"
-  - name: Shinyhit
-    platform: woocommerce
-    url: "https://shinyhit.com"
-  - name: KEEPSEVEN
-    platform: woocommerce
-    url: "https://keepseven.de"
-
-  # --- Platform not known for sure -----------------------------------------
-  - name: TCG-Love
-    platform: auto
-    url: "https://tcg-love.de"
-
-  # --- HTML (JTL, Shopware and others) -----------------------------------
+    collections: [pokemon-30th-celebration]
   - name: Card-Corner
     platform: html
     url: "https://www.card-corner.de"
@@ -168,23 +101,21 @@ shops:
       - "https://www.card-corner.de/pokemon-30th-celebration"
       - "https://www.card-corner.de/pokemon-30-jahre"
     search_url: "https://www.card-corner.de/?qs={q}"
-  - name: Gate to the Games
-    platform: html
-    url: "https://www.gate-to-the-games.de"
-    search_url: "https://www.gate-to-the-games.de/?qs={q}"
-  - name: LottiCards
-    platform: html
-    url: "https://www.lotticards.de"
-    search_url: "https://www.lotticards.de/?qs={q}"
-  - name: Pokegeodude
-    platform: html
-    url: "https://pokegeodude.shop"
-    search_url: "https://pokegeodude.shop/?qs={q}"
-    assume_pokemon: true
   - name: TRADER
     platform: html
     url: "https://trader-online.de"
     search_url: "https://trader-online.de/search?search={q}"
+  - name: Gate to the Games
+    platform: html
+    url: "https://www.gate-to-the-games.de"
+    search_url: "https://www.gate-to-the-games.de/?qs={q}"
+  - name: KEEPSEVEN
+    platform: woocommerce
+    url: "https://keepseven.de"
+  - name: LottiCards
+    platform: html
+    url: "https://www.lotticards.de"
+    search_url: "https://www.lotticards.de/?qs={q}"
   - name: JK-Entertainment
     platform: html
     url: "https://jk-entertainment.de"
@@ -197,8 +128,6 @@ shops:
       - "https://www.comicplanet.de/sammelkarten/pokemon/deutsch/specials-pkm/"
       - "https://www.comicplanet.de/sammelkarten/pokemon/deutsch/displays-pkm/booster-pkm/"
     search_url: "https://www.comicplanet.de/search?sSearch={q}"
-
-  # --- General retail (single product pages, stricter bot checks) ---------
   - name: Netto
     platform: html
     url: "https://www.netto-online.de"
@@ -213,3 +142,101 @@ shops:
     language: DE
     assume_pokemon: true
     interval: 30
+
+  # --- Smaller shops (off) -------------------------------------------------
+  # Little known, often far above retail price. Set enabled: true to watch
+  # one anyway.
+  - name: 2Sleeve
+    platform: shopify
+    url: "https://www.2sleeve.de"
+    enabled: false
+  - name: TCGViert
+    platform: shopify
+    url: "https://tcgviert.com"
+    enabled: false
+  - name: Yonko TCG
+    platform: shopify
+    url: "https://yonko-tcg.de"
+    collections: [30th-celebration-30-jahre]
+    enabled: false
+  - name: Fantasia Cards
+    platform: shopify
+    url: "https://fantasiacards.de"
+    collections: [30th-celebration]
+    enabled: false
+  - name: Feenturm
+    platform: shopify
+    url: "https://feenturm.de"
+    enabled: false
+  - name: Spiel-es
+    platform: shopify
+    url: "https://spiel-es.de"
+    collections: [pokemon-kollektionen]
+    enabled: false
+  - name: Geeks Heaven
+    platform: shopify
+    url: "https://geeksheaven.de"
+    enabled: false
+  - name: Just Nerds TCG
+    platform: shopify
+    url: "https://justnerdstcg.de"
+    enabled: false
+  - name: Chief Cards
+    platform: shopify
+    url: "https://chiefcards.de"
+    enabled: false
+  - name: Pokitrio
+    platform: shopify
+    url: "https://www.pokitrio.de"
+    assume_pokemon: true
+    enabled: false
+  - name: Rot der Sammler
+    platform: shopify
+    url: "https://www.rotdersammler.de"
+    enabled: false
+  - name: Mythracards
+    platform: shopify
+    url: "https://mythracards.com"
+    enabled: false
+  - name: PushDich TCG
+    platform: shopify
+    url: "https://www.pushdich-tcg.de"
+    enabled: false
+  - name: Toy Treasure
+    platform: shopify
+    url: "https://toy-treasure.com"
+    enabled: false
+  - name: KARDS Greifswald
+    platform: shopify
+    url: "https://kardsgreifswald.de"
+    enabled: false
+  - name: Play-Cards
+    platform: shopify
+    url: "https://play-cards.de"
+    enabled: false
+  - name: Schatztruhe
+    platform: shopify
+    url: "https://schatztruhe-shop.de"
+    enabled: false
+  - name: Racoon Rises
+    platform: shopify
+    url: "https://racoon-rises.com"
+    enabled: false
+  - name: Zambomba
+    platform: woocommerce
+    url: "https://www.zambomba.de"
+    enabled: false
+  - name: Shinyhit
+    platform: woocommerce
+    url: "https://shinyhit.com"
+    enabled: false
+  - name: TCG-Love
+    platform: auto
+    url: "https://tcg-love.de"
+    enabled: false
+  - name: Pokegeodude
+    platform: html
+    url: "https://pokegeodude.shop"
+    search_url: "https://pokegeodude.shop/?qs={q}"
+    assume_pokemon: true
+    enabled: false
