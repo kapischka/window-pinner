@@ -28,8 +28,10 @@ Voraussetzung ist Python 3.9 oder neuer.
 Das Radar fragt Shops alle paar Sekunden ab und zeigt, wo ein Produkt der
 30 Jahre Serie (deutsche Ausgabe) oder der 30th CELEBRATION (japanische
 Ausgabe) gerade sofort lieferbar ist, mit dem Aufpreis gegenüber der UVP.
-Vorbestellungen, andere Sprachausgaben, Einzelkarten und gegradete Karten
-werden herausgefiltert. Erkannt wird über den Produkttitel, neue Produkte
+Es zählen nur Sealed Produkte (Displays, Boxen, Kollektionen, Bundles,
+Blister, Decks, Tins, Booster). Einzelkarten, gegradete Karten, Promos,
+Vorbestellungen und andere Sprachausgaben werden herausgefiltert
+(`sealed_only` und `include_preorders` in der Config). Erkannt wird über den Produkttitel, neue Produkte
 tauchen also ohne Konfigurationsänderung auf.
 
 **Das Fenster** („30 Jahre Radar“, <http://127.0.0.1:8765>) öffnet sich
@@ -58,7 +60,9 @@ raus. Angebote ohne bekannte UVP erscheinen ohne Prozentangabe.
 **Shops.** Aktiv sind etablierte TCG Händler (cardcosmos, Card-Corner,
 TRADER, Gate to the Games, KEEPSEVEN, LottiCards, JK-Entertainment,
 Comicplanet), große Ketten (MediaMarkt, Saturn, Müller, Smyths, Thalia,
-Galeria, Spiele Max, Otto, Netto, Amazon, Kaufland) und eBay. Die Ketten
+Galeria, Spiele Max, Otto, Netto, Amazon, Kaufland), Zenpan EU (Lissabon,
+inklusive Mehrwertsteuer), Zenpan Japan (mit 19 % Einfuhrumsatzsteuer
+aufgeschlagen) und eBay. Die Ketten
 bauen ihre Seiten mit JavaScript, deshalb liest sie ein unsichtbarer Chrome
 einmal pro Minute. Bei Marktplätzen (eBay, Amazon, Otto, Kaufland) zählen
 nur Produkte mit bekannter UVP und nur das günstigste Angebot je Produkt;

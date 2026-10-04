@@ -104,6 +104,33 @@ def looks_preorder(text: str, today: date | None = None) -> bool:
     return False
 
 
+# Sealed products name their packaging. A title without any of these words
+# is a single card, a sleeve or other loose merch.
+_SEALED = re.compile(
+    r"display|booster|bundle|box|top[\s-]*trainer|elite[\s-]*trainer|\betb\b|kollektion|collection|\btins?\b"
+    r"|blister|\bdecks?\b|card[\s-]*set|ordner|binder|poster|futuristic|\bcase\b|\bovp\b|sealed|versiegelt"
+    r"|パック|ボックス|デッキ|セット",
+    re.IGNORECASE,
+)
+# Unmistakable single card signs, checked first because singles are often
+# advertised with the box they came from ("Nidorina Promo aus Top-Trainer-Box").
+_SINGLE = re.compile(
+    r"\b\d{1,3}\s*/\s*\d{2,3}\b"  # card number 205/165
+    r"|einzelkarte|single[\s-]*card|\bsingles?\b|promo[\s-]*kart|promo[\s-]*card|holo[\s-]*karte"
+    r"|\bpsa\b|\bcgc\b|\bbgs\b|\bgraded\b|grading|\bkarte aus\b|aus\s+(der|dem|top|einer)\b|\bnur die karte\b"
+    r"|\b(sar|sir|chr|csr|fur|ur|sr|ar|rrr)\b(?!.*\b(display|box|bundle|kollektion|collection|deck)\b)",
+    re.IGNORECASE,
+)
+
+
+def is_sealed(title: str) -> bool:
+    """True for sealed products (displays, boxes, collections, bundles,
+    blisters, decks, tins, single booster packs), False for single cards."""
+    if _SINGLE.search(title):
+        return False
+    return bool(_SEALED.search(title))
+
+
 def is_excluded(title: str, excludes: list[str]) -> bool:
     text = _normalize(title)
     return any(e.lower() in text for e in excludes)

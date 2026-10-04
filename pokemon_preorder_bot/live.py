@@ -58,6 +58,7 @@ class Settings:
         self.languages = {lang.upper() for lang in raw.get("languages", ["DE", "JP"])}
         self.include_unknown_language = bool(raw.get("include_unknown_language", True))
         self.include_preorders = bool(raw.get("include_preorders", False))
+        self.sealed_only = bool(raw.get("sealed_only", True))
         self.queries = list(raw.get("queries", []))
         self.exclude = list(raw.get("exclude", []))
         patterns = raw.get("status_patterns", {})
@@ -134,6 +135,8 @@ class LiveMonitor:
         if not catalog.is_30th(listing.title, listing.context, shop.assume_pokemon):
             return None
         if catalog.is_excluded(listing.title, self.settings.exclude + shop.exclude):
+            return None
+        if self.settings.sealed_only and not catalog.is_sealed(listing.title):
             return None
         lang = catalog.language(listing.title, default=shop.language)
         if lang in self.settings.languages:

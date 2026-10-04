@@ -586,3 +586,31 @@ def test_auto_detection_keeps_locale_prefix():
         {"title": "Pokemon Card Game 30th Celebration Booster Box", "url": "/en-de/products/m6a-box?_pos=1", "available": True, "price": "149.00"}]}}}
     [listing] = parse_shopify_suggest(suggest, "https://zenpan-japan.com/en-de")
     assert listing.url == "https://zenpan-japan.com/en-de/products/m6a-box"
+
+
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        ("Pokémon 30 Jahre Top-Trainer-Box Deutsch", True),
+        ("Pokemon Card Game 30th Celebration Booster Box", True),
+        ("30th Celebration プレミアムデッキセット", True),
+        ("Pokémon 30 Jahre Booster Pack DE", True),
+        ("30 Jahre Mini Tin", True),
+        ("Pikachu ex SAR 205/165 30th Celebration", False),
+        ("Pikachu ex FUR 30th Celebration Japanisch", False),
+        ("Nidorina Promo aus Top-Trainer-Box 30 Jahre", False),
+        ("Mew ex 30 Jahre Holo", False),
+        ("Glurak 30 Jahre PSA 10", False),
+    ],
+)
+def test_is_sealed(title, expected):
+    assert catalog.is_sealed(title) is expected
+
+
+def test_monitor_drops_single_cards(tmp_path, monkeypatch):
+    rounds = [[
+        Listing("Pikachu ex SAR 205/165 30 Jahre Deutsch", "https://shop.de/single", True),
+        Listing("Pokémon 30 Jahre Poster-Kollektion Deutsch", "https://shop.de/poster", True),
+    ]]
+    monitor, shop = _monitor(tmp_path, monkeypatch, rounds)
+    assert [p["url"] for p in monitor.check(shop, None)] == ["https://shop.de/poster"]

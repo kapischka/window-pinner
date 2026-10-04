@@ -47,6 +47,10 @@ settings:
   # Preorders ("Vorbestellung", "Pre-Order", a release date still ahead …)
   # are hidden, only stock that ships now counts. true shows them again.
   include_preorders: false
+  # Only sealed products (displays, boxes, collections, bundles, blisters,
+  # decks, tins, booster packs). Single cards, graded cards and promos are
+  # dropped. false shows everything again.
+  sealed_only: true
   queries:
     - "30th celebration"
     - "30 jahre"
@@ -263,12 +267,19 @@ shops:
     require_reference: true
     best_per_product: true
 
-  # --- Japan import (on) ---------------------------------------------------
-  # Ships from Japan in euros. Import VAT (19 %) usually comes on delivery,
-  # so it's added before the price check; set 0 if the shop includes duties.
-  - name: Zenpan
-    platform: auto
+  # --- Zenpan (on) ---------------------------------------------------------
+  # Zenpan EU ships from Lisbon, VAT included, no customs.
+  - name: Zenpan EU
+    platform: shopify
+    url: "https://zenpan-eu.com"
+    language: JP
+    assume_pokemon: true
+  # Zenpan Japan ships from Japan in euros. Import VAT (19 %) usually comes
+  # on delivery, so it's added before the price check.
+  - name: Zenpan Japan
+    platform: shopify
     url: "https://zenpan-japan.com/en-de"
+    collections: [booster-boxes]
     language: JP
     assume_pokemon: true
     extra_cost_percent: 19
