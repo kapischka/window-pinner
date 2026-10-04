@@ -72,6 +72,7 @@ class Shop:
     require_reference: bool = False  # skip listings without a known UVP (marketplaces)
     best_per_product: bool = False  # keep only the cheapest listing per product (marketplaces)
     exclude: list[str] = field(default_factory=list)  # extra title words to skip, on top of settings.exclude
+    extra_cost_percent: float = 0  # added to prices before the UVP check, e.g. import VAT for shops abroad
 
 
 @dataclass

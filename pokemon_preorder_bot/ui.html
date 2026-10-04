@@ -137,6 +137,7 @@
   .markup-high { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
   .card-bottom { display: flex; align-items: center; gap: 10px; margin-top: auto; }
   .price { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price-note { color: var(--muted); font-size: 13px; font-weight: 400; }
   .shop-name { color: var(--muted); font-size: 13px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .go {
     background: var(--accent); color: var(--accent-text); text-decoration: none; font-weight: 600;
@@ -361,12 +362,17 @@
       var sign = p.markup > 0 ? "+" : p.markup < 0 ? "−" : "±";
       var word = p.markup < 0 ? "unter " : "über ";
       row.append(el("span", "markup markup-" + level, sign + Math.abs(Math.round(p.markup)) + " % " + word + p.reference.kind));
-      row.append(el("span", "", p.reference.kind + " " + euro(p.reference.price)));
+      row.append(el("span", "", p.reference.kind + " " + euro(p.reference.price) + (p.price_note ? " · * " + p.price_note : "")));
       c.append(row);
     }
 
     var bottom = el("div", "card-bottom");
-    bottom.append(el("span", "price", euro(p.price)));
+    var price = el("span", "price", euro(p.price));
+    if (p.price_note) {
+      price.title = p.price_note;
+      price.append(el("small", "price-note", " *"));
+    }
+    bottom.append(price);
     bottom.append(el("span", "shop-name", p.shop));
     var go = el("a", "go", "Zum Shop ↗");
     go.href = p.url;

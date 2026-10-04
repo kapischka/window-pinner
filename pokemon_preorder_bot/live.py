@@ -285,6 +285,8 @@ class LiveMonitor:
                 ref = pricing.find_reference(listing.title, lang, self.settings.references)
                 if ref is None and shop.require_reference:
                     continue
+                if listing.price is not None and shop.extra_cost_percent:
+                    listing.price = round(listing.price * (1 + shop.extra_cost_percent / 100), 2)
                 markup = pricing.markup_percent(listing.price, ref)
                 if markup is not None and markup < self.settings.min_markup:
                     continue
@@ -314,6 +316,7 @@ class LiveMonitor:
                     "preorder": preorder,
                     "reference": {"name": ref.name, "kind": ref.kind, "price": ref.price} if ref else None,
                     "markup": pricing.markup_percent(price, ref),
+                    "price_note": f"inkl. {shop.extra_cost_percent:g} % Einfuhr" if shop.extra_cost_percent else "",
                     "last_seen": now,
                     "misses": 0,
                 }
@@ -343,6 +346,8 @@ class LiveMonitor:
     def describe_price(record: dict) -> str:
         """'54,99 € (+0 % UVP)' or just the price when no reference is known."""
         text = pricing.format_euro(record.get("price"))
+        if record.get("price_note"):
+            text += f" {record['price_note']}"
         if record.get("markup") is not None and record.get("reference"):
             text += f" ({record['markup']:+.0f} % {record['reference']['kind']})"
         return text

@@ -569,3 +569,20 @@ def test_shipped_config_watches_retail_and_ebay_with_prices():
     assert (ttb.name, ttb.price) == ("Top-Trainer-Box", 54.99)
     display = pricing.find_reference("30th Celebration Display M6a", "JP", settings.references)
     assert display.kind == "Richtpreis"
+
+
+def test_import_surcharge_counts_towards_markup(tmp_path, monkeypatch):
+    display = Listing("30th Celebration Booster Display", "https://zen.jp/d", True, 150.0)
+    monitor, shop = _priced_monitor(tmp_path, monkeypatch, [[display]], language="JP", extra_cost_percent=19)
+    [record] = monitor.check(shop, None)
+    assert record["price"] == 178.5 and record["markup"] == 11.6
+    assert "inkl. 19 % Einfuhr" in monitor.describe_price(record)
+
+
+def test_auto_detection_keeps_locale_prefix():
+    session = FakeSession({"https://zenpan-japan.com/en-de/search/suggest.json": FakeResponse(payload={"resources": {}})})
+    assert detect_platform(session, "https://zenpan-japan.com/en-de") == "shopify"
+    suggest = {"resources": {"results": {"products": [
+        {"title": "Pokemon Card Game 30th Celebration Booster Box", "url": "/en-de/products/m6a-box?_pos=1", "available": True, "price": "149.00"}]}}}
+    [listing] = parse_shopify_suggest(suggest, "https://zenpan-japan.com/en-de")
+    assert listing.url == "https://zenpan-japan.com/en-de/products/m6a-box"

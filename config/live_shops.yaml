@@ -27,6 +27,7 @@
 # require_reference: only listings that match a product in `prices` count.
 # best_per_product: only the cheapest offer per product counts (marketplaces).
 # exclude:          extra title words to skip for this shop.
+# extra_cost_percent: added to prices before the UVP check (import VAT …).
 #
 # language: assumed edition when a title has no hint ("Japanisch", "DE",
 #           "M6a", "30 Jahre" …). "?" means unknown.
@@ -261,6 +262,16 @@ shops:
     interval: 90
     require_reference: true
     best_per_product: true
+
+  # --- Japan import (on) ---------------------------------------------------
+  # Ships from Japan in euros. Import VAT (19 %) usually comes on delivery,
+  # so it's added before the price check; set 0 if the shop includes duties.
+  - name: Zenpan
+    platform: auto
+    url: "https://zenpan-japan.com/en-de"
+    language: JP
+    assume_pokemon: true
+    extra_cost_percent: 19
 
   # --- eBay (on) -----------------------------------------------------------
   # Only products with a known UVP, only the cheapest offer per product, and
